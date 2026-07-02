@@ -1,0 +1,316 @@
+[
+    {
+        "bed": "bd49632138fb4b75d505156379f25fb9, 0 วัน",
+        "captures": [
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_0_100123_WaveformExport.csv",
+                "time": "10:01:23"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_0_120126_WaveformExport.csv",
+                "time": "12:01:26"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_0_130124_WaveformExport.csv",
+                "time": "13:01:24"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_0_140207_WaveformExport.csv",
+                "time": "14:02:07"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_0_150203_WaveformExport.csv",
+                "time": "15:02:03"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_0_170204_WaveformExport.csv",
+                "time": "17:02:04"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_0_180203_WaveformExport.csv",
+                "time": "18:02:03"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_0_190210_WaveformExport.csv",
+                "time": "19:02:10"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_0_200209_WaveformExport.csv",
+                "time": "20:02:09"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_0_210216_WaveformExport.csv",
+                "time": "21:02:16"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_0_210226_WaveformExport.csv",
+                "time": "21:02:26"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_0_230206_WaveformExport.csv",
+                "time": "23:02:06"
+            }
+        ],
+        "demographic": "BW/HT 67 kg / 155 cm BMI 27.89 kg/m2",
+        "diagnosis": "PDx ไม่ระบุ SDx ไม่ระบุ",
+        "operation": "HxSx ไม่ระบุ",
+        "patient": "ช 81 ปี",
+        "ven": "011"
+    },
+    {
+        "bed": "bd49632138fb4b75d505156379f25fb9, 1 วัน",
+        "captures": [
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_000202_WaveformExport.csv",
+                "time": "00:02:02"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_010207_WaveformExport.csv",
+                "time": "01:02:07"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_020206_WaveformExport.csv",
+                "time": "02:02:06"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_030209_WaveformExport.csv",
+                "time": "03:02:09"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_040206_WaveformExport.csv",
+                "time": "04:02:06"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_050213_WaveformExport.csv",
+                "time": "05:02:13"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_060206_WaveformExport.csv",
+                "time": "06:02:06"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_070214_WaveformExport.csv",
+                "time": "07:02:14"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_070224_WaveformExport.csv",
+                "time": "07:02:24"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_090205_WaveformExport.csv",
+                "time": "09:02:05"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_110208_WaveformExport.csv",
+                "time": "11:02:08"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_130206_WaveformExport.csv",
+                "time": "13:02:06"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_150134_WaveformExport.csv",
+                "time": "15:01:34"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_160253_WaveformExport.csv",
+                "time": "16:02:53"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_172107_WaveformExport.csv",
+                "time": "17:21:07"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_180130_WaveformExport.csv",
+                "time": "18:01:30"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_190137_WaveformExport.csv",
+                "time": "19:01:37"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_210341_WaveformExport.csv",
+                "time": "21:03:41"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_1_220328_WaveformExport.csv",
+                "time": "22:03:28"
+            }
+        ],
+        "demographic": "BW/HT 67 kg / 155 cm BMI 27.89 kg/m2",
+        "diagnosis": "PDx Acute exacerbation of COPD (J44.1) SDx COPD - Chronic ob",
+        "operation": "HxSx Endotracheal intubation Mechanical ventilation Non-invasive ve",
+        "patient": "ช 81 ปี",
+        "ven": "011"
+    },
+    {
+        "bed": "bd49632138fb4b75d505156379f25fb9, 2 วัน",
+        "captures": [
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_010325_WaveformExport.csv",
+                "time": "01:03:25"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_020328_WaveformExport.csv",
+                "time": "02:03:28"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_030324_WaveformExport.csv",
+                "time": "03:03:24"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_040325_WaveformExport.csv",
+                "time": "04:03:25"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_050337_WaveformExport.csv",
+                "time": "05:03:37"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_060324_WaveformExport.csv",
+                "time": "06:03:24"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_070320_WaveformExport.csv",
+                "time": "07:03:20"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_080326_WaveformExport.csv",
+                "time": "08:03:26"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_110330_WaveformExport.csv",
+                "time": "11:03:30"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_150401_WaveformExport.csv",
+                "time": "15:04:01"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_160323_WaveformExport.csv",
+                "time": "16:03:23"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_170353_WaveformExport.csv",
+                "time": "17:03:53"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_180134_WaveformExport.csv",
+                "time": "18:01:34"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_190139_WaveformExport.csv",
+                "time": "19:01:39"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_200221_WaveformExport.csv",
+                "time": "20:02:21"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_200231_WaveformExport.csv",
+                "time": "20:02:31"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_220203_WaveformExport.csv",
+                "time": "22:02:03"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_2_230211_WaveformExport.csv",
+                "time": "23:02:11"
+            }
+        ],
+        "demographic": "BW/HT 67 kg / 155 cm BMI 27.89 kg/m2",
+        "diagnosis": "PDx Acute exacerbation of COPD (J44.1) SDx COPD - Chronic ob",
+        "operation": "HxSx Endotracheal intubation Mechanical ventilation Non-invasive ve",
+        "patient": "ช 81 ปี",
+        "ven": "011"
+    },
+    {
+        "bed": "bd49632138fb4b75d505156379f25fb9, 3 วัน",
+        "captures": [
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_3_000208_WaveformExport.csv",
+                "time": "00:02:08"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_3_010211_WaveformExport.csv",
+                "time": "01:02:11"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_3_020207_WaveformExport.csv",
+                "time": "02:02:07"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_3_030211_WaveformExport.csv",
+                "time": "03:02:11"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_3_040212_WaveformExport.csv",
+                "time": "04:02:12"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_3_050212_WaveformExport.csv",
+                "time": "05:02:12"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_3_060211_WaveformExport.csv",
+                "time": "06:02:11"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_3_070234_WaveformExport.csv",
+                "time": "07:02:34"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_3_080215_WaveformExport.csv",
+                "time": "08:02:15"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_3_080225_WaveformExport.csv",
+                "time": "08:02:25"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_3_110200_WaveformExport.csv",
+                "time": "11:02:00"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_3_120205_WaveformExport.csv",
+                "time": "12:02:05"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_3_130204_WaveformExport.csv",
+                "time": "13:02:04"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_3_140156_WaveformExport.csv",
+                "time": "14:01:56"
+            },
+            {
+                "raw_data": "bd49632138fb4b75d505156379f25fb9_3_150319_WaveformExport.csv",
+                "time": "15:03:19"
+            }
+        ],
+        "demographic": "BW/HT 67 kg / 155 cm BMI 27.89 kg/m2",
+        "diagnosis": "PDx Acute exacerbation of COPD (J44.1) SDx COPD - Chronic ob",
+        "operation": "HxSx Endotracheal intubation Mechanical ventilation Non-invasive ve",
+        "patient": "ช 81 ปี",
+        "ven": "011"
+    },
+    {
+        "bed": "bd49632138fb4b75d505156379f25fb9, 4 วัน",
+        "captures": [],
+        "demographic": "BW/HT 67 kg / 155 cm BMI 27.89 kg/m2",
+        "diagnosis": "PDx Acute exacerbation of COPD (J44.1) SDx COPD - Chronic ob",
+        "operation": "HxSx Endotracheal intubation Mechanical ventilation Non-invasive ve",
+        "patient": "ช 81 ปี",
+        "ven": "011"
+    },
+    {
+        "bed": "bd49632138fb4b75d505156379f25fb9, 5 วัน",
+        "captures": [],
+        "demographic": "BW/HT 67 kg / 155 cm BMI 27.89 kg/m2",
+        "diagnosis": "PDx Acute exacerbation of COPD (J44.1) SDx COPD - Chronic ob",
+        "operation": "HxSx Endotracheal intubation Mechanical ventilation Non-invasive ve",
+        "patient": "ช 81 ปี",
+        "ven": "011"
+    }
+]

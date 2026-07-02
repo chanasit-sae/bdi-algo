@@ -1,0 +1,70 @@
+[
+    {
+        "bed": "2a7b9f1857ab1296725ab6fb1c0b5895, 4 วัน",
+        "captures": [
+            {
+                "raw_data": "2a7b9f1857ab1296725ab6fb1c0b5895_4_102336_WaveformExport.csv",
+                "time": "10:23:36"
+            }
+        ],
+        "demographic": "BW/HT 45 kg / 170 cm BMI 15.57 kg/m2",
+        "diagnosis": "PDx Hemoptysis (R04.2) SDx Acute respiratory failure (J96.09",
+        "operation": "HxSx Percutaneous embolisation of bronchial artery Endotracheal int",
+        "patient": "ช 47 ปี",
+        "ven": "011"
+    },
+    {
+        "bed": "2a7b9f1857ab1296725ab6fb1c0b5895, 14 วัน",
+        "captures": [
+            {
+                "raw_data": "2a7b9f1857ab1296725ab6fb1c0b5895_14_111131_WaveformExport.csv",
+                "time": "11:11:31"
+            },
+            {
+                "raw_data": "2a7b9f1857ab1296725ab6fb1c0b5895_14_111825_WaveformExport.csv",
+                "time": "11:18:25"
+            }
+        ],
+        "demographic": "BW/HT 45 kg / 170 cm BMI 15.57 kg/m2",
+        "diagnosis": "PDx Hemoptysis (R04.2) SDx Acute respiratory failure (J96.09",
+        "operation": "HxSx Percutaneous embolisation of bronchial artery Endotracheal int",
+        "patient": "ช 47 ปี",
+        "ven": "011"
+    },
+    {
+        "bed": "2a7b9f1857ab1296725ab6fb1c0b5895, 15 วัน",
+        "captures": [],
+        "demographic": "BW/HT 45 kg / 170 cm BMI 15.57 kg/m2",
+        "diagnosis": "PDx Hemoptysis (R04.2) SDx Acute respiratory failure (J96.09",
+        "operation": "HxSx Percutaneous embolisation of bronchial artery Endotracheal int",
+        "patient": "ช 47 ปี",
+        "ven": "011"
+    },
+    {
+        "bed": "2a7b9f1857ab1296725ab6fb1c0b5895, 16 วัน",
+        "captures": [],
+        "demographic": "BW/HT 45 kg / 170 cm BMI 15.57 kg/m2",
+        "diagnosis": "PDx Hemoptysis (R04.2) SDx Acute respiratory failure (J96.09",
+        "operation": "HxSx Percutaneous embolisation of bronchial artery Endotracheal int",
+        "patient": "ช 47 ปี",
+        "ven": "011"
+    },
+    {
+        "bed": "2a7b9f1857ab1296725ab6fb1c0b5895, 17 วัน",
+        "captures": [],
+        "demographic": "BW/HT 45 kg / 170 cm BMI 15.57 kg/m2",
+        "diagnosis": "PDx Hemoptysis (R04.2) SDx Acute respiratory failure (J96.09",
+        "operation": "HxSx Percutaneous embolisation of bronchial artery Endotracheal int",
+        "patient": "ช 47 ปี",
+        "ven": "011"
+    },
+    {
+        "bed": "2a7b9f1857ab1296725ab6fb1c0b5895, 18 วัน",
+        "captures": [],
+        "demographic": "BW/HT 45 kg / 170 cm BMI 15.57 kg/m2",
+        "diagnosis": "PDx Hemoptysis (R04.2) SDx Acute respiratory failure (J96.09",
+        "operation": "HxSx Percutaneous embolisation of bronchial artery Endotracheal int",
+        "patient": "ช 47 ปี",
+        "ven": "011"
+    }
+]

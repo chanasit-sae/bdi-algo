@@ -1,0 +1,97 @@
+[
+    {
+        "bed": "5ea4aaf18779681f4b0fbf093c233521, 0 วัน",
+        "captures": [
+            {
+                "raw_data": "5ea4aaf18779681f4b0fbf093c233521_0_230030_WaveformExport.csv",
+                "time": "23:00:30"
+            }
+        ],
+        "demographic": "BW/HT - kg / - cm BMI - kg/m2",
+        "diagnosis": "PDx ไม่ระบุ SDx ไม่ระบุ",
+        "operation": "HxSx ไม่ระบุ",
+        "patient": "ช 87 ปี",
+        "ven": "015"
+    },
+    {
+        "bed": "5ea4aaf18779681f4b0fbf093c233521, 1 วัน",
+        "captures": [],
+        "demographic": "BW/HT 45 kg / 160 cm BMI 17.58 kg/m2",
+        "diagnosis": "PDx Aspiration pneumonia (J69.0) SDx Septic shock (A41.9)",
+        "operation": "HxSx ไม่ระบุ",
+        "patient": "ช 87 ปี",
+        "ven": "015"
+    },
+    {
+        "bed": "5ea4aaf18779681f4b0fbf093c233521, 2 วัน",
+        "captures": [],
+        "demographic": "BW/HT 45 kg / 160 cm BMI 17.58 kg/m2",
+        "diagnosis": "PDx Aspiration pneumonia (J69.0) SDx Septic shock (A41.9)",
+        "operation": "HxSx ไม่ระบุ",
+        "patient": "ช 87 ปี",
+        "ven": "015"
+    },
+    {
+        "bed": "5ea4aaf18779681f4b0fbf093c233521, 3 วัน",
+        "captures": [],
+        "demographic": "BW/HT 45 kg / 160 cm BMI 17.58 kg/m2",
+        "diagnosis": "PDx Aspiration pneumonia (J69.0) SDx Septic shock (A41.9) Ac",
+        "operation": "HxSx Endotracheal intubation Mechanical ventilation",
+        "patient": "ช 87 ปี",
+        "ven": "015"
+    },
+    {
+        "bed": "5ea4aaf18779681f4b0fbf093c233521, 4 วัน",
+        "captures": [],
+        "demographic": "BW/HT 45 kg / 160 cm BMI 17.58 kg/m2",
+        "diagnosis": "PDx Aspiration pneumonia (J69.0) SDx Septic shock (A41.9) Ac",
+        "operation": "HxSx Endotracheal intubation Mechanical ventilation",
+        "patient": "ช 87 ปี",
+        "ven": "015"
+    },
+    {
+        "bed": "5ea4aaf18779681f4b0fbf093c233521, 5 วัน",
+        "captures": [],
+        "demographic": "BW/HT 45 kg / 160 cm BMI 17.58 kg/m2",
+        "diagnosis": "PDx Aspiration pneumonia (J69.0) SDx Septic shock (A41.9) Ac",
+        "operation": "HxSx Endotracheal intubation Mechanical ventilation Heated and humi",
+        "patient": "ช 87 ปี",
+        "ven": "015"
+    },
+    {
+        "bed": "5ea4aaf18779681f4b0fbf093c233521, 6 วัน",
+        "captures": [],
+        "demographic": "BW/HT 45 kg / 160 cm BMI 17.58 kg/m2",
+        "diagnosis": "PDx Aspiration pneumonia (J69.0) SDx Septic shock (A41.9) Ac",
+        "operation": "HxSx Endotracheal intubation Mechanical ventilation Heated and humi",
+        "patient": "ช 87 ปี",
+        "ven": "015"
+    },
+    {
+        "bed": "5ea4aaf18779681f4b0fbf093c233521, 7 วัน",
+        "captures": [],
+        "demographic": "BW/HT 45 kg / 160 cm BMI 17.58 kg/m2",
+        "diagnosis": "PDx Aspiration pneumonia (J69.0) SDx Septic shock (A41.9) Ac",
+        "operation": "HxSx Endotracheal intubation Mechanical ventilation Heated and humi",
+        "patient": "ช 87 ปี",
+        "ven": "015"
+    },
+    {
+        "bed": "5ea4aaf18779681f4b0fbf093c233521, 8 วัน",
+        "captures": [],
+        "demographic": "BW/HT 45 kg / 160 cm BMI 17.58 kg/m2",
+        "diagnosis": "PDx Aspiration pneumonia (J69.0) SDx Septic shock (A41.9) Ac",
+        "operation": "HxSx Endotracheal intubation Mechanical ventilation Heated and humi",
+        "patient": "ช 87 ปี",
+        "ven": "015"
+    },
+    {
+        "bed": "5ea4aaf18779681f4b0fbf093c233521, 9 วัน",
+        "captures": [],
+        "demographic": "BW/HT 45 kg / 160 cm BMI 17.58 kg/m2",
+        "diagnosis": "PDx Aspiration pneumonia (J69.0) SDx Septic shock (A41.9) Ac",
+        "operation": "HxSx Endotracheal intubation Mechanical ventilation Heated and humi",
+        "patient": "ช 87 ปี",
+        "ven": "015"
+    }
+]
