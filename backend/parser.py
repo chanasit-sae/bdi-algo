@@ -202,6 +202,14 @@ def load_waveform(path: str | Path, add_time: bool = True) -> pd.DataFrame:
     """
     df = pd.read_csv(path, skip_blank_lines=True, encoding="utf-8-sig")
     df.columns = WAVEFORM_COLUMNS
+    # Some captures in the full dataset have a stray non-numeric value in one
+    # of these columns (e.g. a repeated header row, a text artifact), which
+    # makes pandas infer the whole column as strings instead of floats and
+    # breaks every downstream numeric op. Coerce explicitly so any such value
+    # becomes NaN (handled by the existing np.nanmax/nanmin calls) rather than
+    # silently turning the column into object dtype.
+    for col in WAVEFORM_COLUMNS:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df.dropna(how="all").reset_index(drop=True)
     if add_time:
         df.insert(0, "t_sec", df.index / SAMPLE_RATE_HZ)
