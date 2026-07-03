@@ -182,7 +182,7 @@ const EXP_FILL  = 'rgba(255,138,101,0.13)';  // expiration band
 let INDEX = null;
 let CUR = { file:null, wf:null, breaths:[] };  // current capture state
 
-async function j(url){ const r = await fetch(url); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+async function j(url){ const r = await fetch(location.origin + url); if(!r.ok) throw new Error(await r.text()); return r.json(); }
 
 function drawChart(canvasId, t, y, color, breaths, sel, baseVal){
   const cv = document.getElementById(canvasId);
@@ -491,7 +491,7 @@ def main():
     n_cap = sum(len(p["captures"]) for p in Handler.index["patients"])
     print(f"loaded {len(Handler.index['patients'])} patients, {n_cap} captures from {args.data}")
     print(f"serving http://localhost:{args.port}  (Ctrl+C to stop)")
-    srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    srv = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
