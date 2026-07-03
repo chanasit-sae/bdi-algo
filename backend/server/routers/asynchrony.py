@@ -4,20 +4,22 @@
     GET /api/auto-peep?file=...&<segmentation>&<auto-peep formula>   (single capture, auto-PEEP only)
     GET /api/flow-starvation?file=...&<segmentation>&<flow-starvation formula>   (single capture, flow-starvation only)
     GET /api/mechanical-power?<segmentation>&<mp formula>&patient_id=&include_disconnected=   (per-patient, not per-capture)
+    GET /api/asynchrony-index?<segmentation>&<dt/ie/ap/fs formulas>&patient_id=   (per-patient, not per-capture)
     GET /api/notifications?<same params>&patient_id=&include_disconnected=&types=&page=&page_size=
 
 Segmentation query params are identical to /api/breaths (event timing comes
 directly from the chosen breath boundaries). See backend/asynchrony.py,
 backend/ineffective_effort.py, backend/auto_peep.py, backend/flow_starvation.py,
-and backend/mechanical_power.py for the five detection formulas.
+and backend/mechanical_power.py for the detection formulas.
 
 Every event, regardless of `type`, carries two generalized fields so the
 frontend never needs per-type branching: `t0`/`t1` (the span to highlight on
 a chart) and `detail` (a short human-readable summary). Type-specific raw
 fields (te_gap, flow_prominence, peep_delta, ...) are also included for
-anyone who wants the full detail. Mechanical power is the one exception to
-"a chart span" -- it's a per-patient rolling average, not a single breath
-event, so its `t0`/`t1` are null; see mechanical_power.py.
+anyone who wants the full detail. Mechanical power and the asynchrony index
+are both exceptions to "a chart span" -- they're per-patient aggregates, not
+single breath events, so their `t0`/`t1` are null; see mechanical_power.py and
+_patient_asynchrony_index below.
 
 /api/notifications is backed by a `NotificationScan` (see dataset.py): captures
 are sorted most-recent-first once, then scanned lazily, one at a time, with
@@ -26,10 +28,17 @@ only advances the scan until it has enough results to answer that page, so
 opening the Notifications page never waits on the whole dataset, and no
 capture is ever scanned twice for the same params. A background task started
 at server boot (main.py) advances the same shared scan toward completion, so
-later requests increasingly find it already done. Mechanical power is merged
-in alongside it, computed per-patient and cached in `ds.mp_cache` (see
-_patient_mp_raw) rather than advanced incrementally, since it needs a
-patient's whole rolling window, not one capture at a time, to mean anything.
+later requests increasingly find it already done. Mechanical power and the
+asynchrony index are each merged in alongside it via their own per-patient
+NotificationScan (see get_or_create_mp_scan/get_or_create_ai_scan), computed
+lazily and cached (ds.mp_cache/ds.asynchrony_index_cache) rather than advanced
+per-capture, since each needs a patient's whole capture set to mean anything.
+
+Note: mp_params and ai_params both have a concept of "threshold" but use
+different query param names (`threshold` vs `ai_threshold`) -- FastAPI binds
+same-named params from different Depends() to the same query key when both
+are used on one endpoint, so giving them the same name would make the two
+thresholds impossible to set independently (verified this the hard way).
 """
 
 from __future__ import annotations
@@ -130,6 +139,19 @@ def mp_params(
     return {"threshold": threshold, "window_hours": window_hours}
 
 
+def ai_params(
+    # aliased to ai_threshold -- mp_params also has a query param literally
+    # named "threshold", and FastAPI binds same-named params from different
+    # Depends() to the same query key when both are used together on one
+    # endpoint (verified: ?threshold=5 was silently setting BOTH MP's and
+    # AI's threshold at once). The alias keeps them independently settable;
+    # the dict key stays "threshold" since nothing downstream needs to know
+    # about the query-string rename.
+    threshold: float = Query(10.0, alias="ai_threshold", ge=0.0, le=100.0, description="alert once a patient's asynchrony index (%) reaches this"),
+) -> dict:
+    return {"threshold": threshold}
+
+
 def _scan_capture(wf, fname: str, seg: dict, dt: dict, ie: dict, ap: dict, fs: dict) -> tuple[list[dict], float, int]:
     """Run every detector on one capture's waveform; returns (events, baseline, n_breaths)."""
     breaths, base_val = segment_from_params(
@@ -203,13 +225,14 @@ def _scan_capture(wf, fname: str, seg: dict, dt: dict, ie: dict, ap: dict, fs: d
     return events, base_val, len(breaths)
 
 
-def _formula_block(dt: dict, ie: dict, ap: dict, fs: dict, mp: dict) -> dict:
+def _formula_block(dt: dict, ie: dict, ap: dict, fs: dict, mp: dict, ai: dict) -> dict:
     return {
         "double_trigger": {"criterion": "te_gap < ratio * ti_ref", **dt},
         "ineffective_effort": {"criterion": "concordant flow-bump + pressure-dip within concurrent_tol_sec", **ie},
         "auto_peep": {"criterion": "flow_residual_frac > flow_frac (+ peep_delta > peep_min)", **ap},
         "flow_starvation": {"criterion": "rise-dip-rise notch in inspiratory pressure, both sides >= dip_prominence", **fs},
         "mechanical_power": {"criterion": "trailing rolling-average mp_j_per_min >= threshold", **mp},
+        "asynchrony_index": {"criterion": "asynchrony_index (%) >= threshold", **ai},
     }
 
 
@@ -340,6 +363,43 @@ def advance_mp_scan(
             scan.add_result(notif)
 
 
+def _ai_scan_key(seg: dict, dt: dict, ie: dict, ap: dict, fs: dict, ai: dict, patient_id: str | None):
+    return (
+        tuple(sorted(seg.items())), tuple(sorted(dt.items())), tuple(sorted(ie.items())),
+        tuple(sorted(ap.items())), tuple(sorted(fs.items())), tuple(sorted(ai.items())), patient_id,
+    )
+
+
+def get_or_create_ai_scan(
+    ds: Dataset, seg: dict, dt: dict, ie: dict, ap: dict, fs: dict, ai: dict, patient_id: str | None
+) -> NotificationScan:
+    """Same idea as `get_or_create_mp_scan`, one patient-level scan per param
+    combo for the asynchrony index instead of mechanical power."""
+    key = _ai_scan_key(seg, dt, ie, ap, fs, ai, patient_id)
+    scan = ds.ai_scans.get(key)
+    if scan is None:
+        scan = NotificationScan(_build_mp_pending(ds, patient_id))
+        ds.ai_scans[key] = scan
+    return scan
+
+
+def advance_ai_scan(
+    ds: Dataset, scan: NotificationScan, seg: dict, dt: dict, ie: dict, ap: dict, fs: dict, ai: dict, needed: int
+) -> None:
+    """Claim and process pending patients until `scan.results` has at least
+    `needed` flagged patients or every patient has been checked (same bounded
+    pattern as `advance_mp_scan`)."""
+    while len(scan.results) < needed:
+        p = scan.claim_next()
+        if p is None:
+            break
+        result = _patient_asynchrony_index(ds, seg, dt, ie, ap, fs, p)
+        scan.mark_scanned()
+        notif = _ai_notification(p, result, ai["threshold"], seg)
+        if notif is not None:
+            scan.add_result(notif)
+
+
 @router.get("/asynchrony")
 def get_asynchrony(
     file: str = Query(..., description="capture CSV filename from /api/index"),
@@ -349,11 +409,13 @@ def get_asynchrony(
     ap: dict = Depends(auto_peep_params),
     fs: dict = Depends(flow_starvation_params),
     mp: dict = Depends(mp_params),
+    ai: dict = Depends(ai_params),
     ds: Dataset = Depends(get_dataset),
 ):
     """All asynchrony events (every detector) for one capture. Mechanical
-    power is patient-level (not per-capture) so it isn't in `events` here --
-    see /api/mechanical-power or /api/notifications -- but its params still
+    power and the asynchrony index are both patient-level (not per-capture)
+    so neither is in `events` here -- see /api/mechanical-power,
+    /api/asynchrony-index, or /api/notifications -- but their params still
     round-trip through `formula` so a notification's deep link stays intact.
     """
     require_valid(ds, file)
@@ -363,7 +425,7 @@ def get_asynchrony(
         "events": events,
         "n_breaths": n_breaths,
         "baseline": base_val,
-        "formula": _formula_block(dt, ie, ap, fs, mp),
+        "formula": _formula_block(dt, ie, ap, fs, mp, ai),
     })
 
 
@@ -462,6 +524,9 @@ def get_mechanical_power(
 def _patient_asynchrony_index(ds: Dataset, seg: dict, dt: dict, ie: dict, ap: dict, fs: dict, patient: dict) -> dict:
     """asynchrony_index = total flagged-event seconds / total waveform seconds,
     across the patient's connected captures. Cached per (patient, all params).
+    Also tracks the most recent capture seen, so a notification built from
+    this has somewhere to link/sort by even though the index itself is a
+    whole-patient aggregate rather than a single-capture event.
     """
     key = (
         patient["patient_id"], tuple(sorted(seg.items())), tuple(sorted(dt.items())),
@@ -472,9 +537,12 @@ def _patient_asynchrony_index(ds: Dataset, seg: dict, dt: dict, ie: dict, ap: di
 
     total_async_sec = 0.0
     total_wave_sec = 0.0
+    latest = None  # (day, time, raw_data), most recent by _capture_sort_key
     for c in patient["captures"]:
         if not c["connected"]:
             continue
+        if latest is None or _capture_sort_key(c) > _capture_sort_key(latest[3]):
+            latest = (c["day"], c["time"], c["raw_data"], c)
         wf = load_waveform(ds.data_dir / c["raw_data"])
         events, _base_val, _n = _scan_capture(wf, c["raw_data"], seg, dt, ie, ap, fs)
         total_wave_sec += float(wf["t_sec"].iloc[-1]) if len(wf) else 0.0
@@ -487,9 +555,38 @@ def _patient_asynchrony_index(ds: Dataset, seg: dict, dt: dict, ie: dict, ap: di
         "total_asynchrony_sec": round(total_async_sec, 3),
         "total_waveform_sec": round(total_wave_sec, 3),
         "asynchrony_index": round(total_async_sec / total_wave_sec, 6) if total_wave_sec > 0 else 0.0,
+        "latest_day": latest[0] if latest else None,
+        "latest_time": latest[1] if latest else None,
+        "latest_raw_data": latest[2] if latest else None,
     }
     ds.asynchrony_index_cache[key] = result
     return result
+
+
+def _ai_notification(patient: dict, result: dict | None, threshold: float, seg: dict) -> dict | None:
+    """Notification-shaped dict for one patient's asynchrony index, or None
+    if there's no result yet, no waveform time to compute it from, or it's
+    below threshold."""
+    if result is None or result["latest_raw_data"] is None:
+        return None
+    pct = result["asynchrony_index"] * 100
+    if pct < threshold:
+        return None
+    return {
+        "type": "asynchrony_index",
+        "patient_id": patient["patient_id"],
+        "raw_data": result["latest_raw_data"],
+        "day": result["latest_day"],
+        "time": result["latest_time"],
+        "t0": None,
+        "t1": None,
+        "detail": f"asynchrony index {pct:.1f}% ({result['total_asynchrony_sec']:.1f}s / {result['total_waveform_sec']:.1f}s)",
+        "asynchrony_index": result["asynchrony_index"],
+        "total_asynchrony_sec": result["total_asynchrony_sec"],
+        "total_waveform_sec": result["total_waveform_sec"],
+        "threshold": threshold,
+        "segmentation": {k: seg[k] for k in _SEG_KEYS},
+    }
 
 
 @router.get("/asynchrony-index")
@@ -593,31 +690,36 @@ def get_notifications(
     ap: dict = Depends(auto_peep_params),
     fs: dict = Depends(flow_starvation_params),
     mp: dict = Depends(mp_params),
+    ai: dict = Depends(ai_params),
     patient_id: str | None = Query(None, description="restrict the scan to one patient; omit to scan the whole dataset"),
     include_disconnected: bool = Query(False, description="also scan captures flagged disconnected (flat flow, no real breathing -> never produces events, skipped by default for speed)"),
-    types: list[str] | None = Query(None, description="restrict to these notification types (double_trigger, ineffective_effort, auto_peep, flow_starvation, mechanical_power); omit for all"),
+    types: list[str] | None = Query(None, description="restrict to these notification types (double_trigger, ineffective_effort, auto_peep, flow_starvation, mechanical_power, asynchrony_index); omit for all"),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     ds: Dataset = Depends(get_dataset),
 ):
     scan = get_or_create_scan(ds, seg, dt, ie, ap, fs, patient_id, include_disconnected)
     mp_scan = get_or_create_mp_scan(ds, seg, mp, patient_id, include_disconnected)
+    ai_scan = get_or_create_ai_scan(ds, seg, dt, ie, ap, fs, ai, patient_id)
 
-    # Mechanical power is patient-level, not per-capture, so it can't share
-    # the breath-event scan above -- it gets its own NotificationScan over
-    # patients instead of captures, advanced with the exact same "only do
-    # enough work for this page" bound, so a page request never waits on
-    # either the whole capture list OR every patient's rolling window.
+    # Mechanical power and the asynchrony index are both patient-level, not
+    # per-capture, so neither can share the breath-event scan above -- each
+    # gets its own NotificationScan over patients instead of captures,
+    # advanced with the exact same "only do enough work for this page" bound,
+    # so a page request never waits on the whole capture list OR every
+    # patient's own computation either.
     needed = page * page_size
     if not scan.complete and len(scan.results) < needed:
         advance_scan(ds, scan, seg, dt, ie, ap, fs, needed)
     if not mp_scan.complete and len(mp_scan.results) < needed:
         advance_mp_scan(ds, mp_scan, seg, mp, include_disconnected, needed)
+    if not ai_scan.complete and len(ai_scan.results) < needed:
+        advance_ai_scan(ds, ai_scan, seg, dt, ie, ap, fs, ai, needed)
 
     # results can complete out of claim-order under concurrent advancing
     # (two captures processed in parallel may finish in either order), so
     # re-sort before slicing rather than trusting append order.
-    ordered = sorted(scan.results + mp_scan.results, key=_capture_sort_key, reverse=True)
+    ordered = sorted(scan.results + mp_scan.results + ai_scan.results, key=_capture_sort_key, reverse=True)
     # Filtered after the merge (not baked into the scans themselves) so the
     # underlying scan stays shared/cached across every filter selection --
     # `types` only ever narrows which already-found results are shown.
@@ -635,8 +737,8 @@ def get_notifications(
         "total": total,
         "total_pages": max(1, -(-total // page_size)),
         "scanned_captures": scan.scanned,
-        "scan_complete": scan.complete and mp_scan.complete,
-        "formula": _formula_block(dt, ie, ap, fs, mp),
+        "scan_complete": scan.complete and mp_scan.complete and ai_scan.complete,
+        "formula": _formula_block(dt, ie, ap, fs, mp, ai),
     })
 
 
@@ -665,3 +767,7 @@ def warmup_notifications(ds: Dataset) -> None:
     mp = mp_params(threshold=17.0, window_hours=24.0)
     mp_scan = get_or_create_mp_scan(ds, seg, mp, None, False)
     advance_mp_scan(ds, mp_scan, seg, mp, False, needed=len(mp_scan.pending))
+
+    ai = ai_params(threshold=10.0)
+    ai_scan = get_or_create_ai_scan(ds, seg, dt, ie, ap, fs, ai, None)
+    advance_ai_scan(ds, ai_scan, seg, dt, ie, ap, fs, ai, needed=len(ai_scan.pending))

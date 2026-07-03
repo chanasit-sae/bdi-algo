@@ -10,16 +10,24 @@ export const TYPE_LABEL = {
   auto_peep: "Auto-PEEP",
   flow_starvation: "Flow starvation",
   mechanical_power: "Mechanical power",
+  asynchrony_index: "Asynchrony index",
 };
 
 // Build the Viewer deep-link for one notification: selects the same
 // patient/capture, reproduces the exact segmentation AND every detector's
 // formula params that produced it, so the Viewer's own asynchrony scan is
-// guaranteed to find this same event and highlight it. Mechanical power is
-// patient-level, not a single breath, so `breath` is only added when the
-// notification actually has one (every type except mechanical_power).
+// guaranteed to find this same event and highlight it. Mechanical power and
+// the asynchrony index are both patient-level, not a single breath, so
+// `breath` is only added when the notification actually has one.
 function viewerLink(n, formula) {
-  const { double_trigger: dt, ineffective_effort: ie, auto_peep: ap, flow_starvation: fs, mechanical_power: mp } = formula;
+  const {
+    double_trigger: dt,
+    ineffective_effort: ie,
+    auto_peep: ap,
+    flow_starvation: fs,
+    mechanical_power: mp,
+    asynchrony_index: ai,
+  } = formula;
   const sp = new URLSearchParams({
     file: n.raw_data,
     ...n.segmentation,
@@ -42,6 +50,7 @@ function viewerLink(n, formula) {
     flow_range_max: String(fs.flow_range_max),
     threshold: String(mp.threshold),
     window_hours: String(mp.window_hours),
+    ai_threshold: String(ai.threshold),
   });
   if (n.breath_idx_a != null) sp.set("breath", String(n.breath_idx_a));
   return `/?${sp.toString()}`;

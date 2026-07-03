@@ -1,5 +1,6 @@
 import ViewerPage from "./pages/ViewerPage.jsx";
 import NotificationsPage from "./pages/NotificationsPage.jsx";
+import PatientsPage from "./pages/PatientsPage.jsx";
 import AboutPage from "./pages/AboutPage.jsx";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -14,6 +15,7 @@ import AboutPage from "./pages/AboutPage.jsx";
 const routes = [
   { path: "/", label: "Viewer", element: <ViewerPage /> },
   { path: "/notifications", label: "Notifications", element: <NotificationsPage /> },
+  { path: "/patients", label: "Patients", element: <PatientsPage /> },
   { path: "/about", label: "About", element: <AboutPage /> },
 ];
 

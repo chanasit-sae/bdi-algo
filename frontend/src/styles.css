@@ -1,14 +1,19 @@
+/* Healthcare theme: clean clinical white/light-gray shell with a teal
+   clinical accent. Trace colors follow patient-monitor convention --
+   cyan/green/amber for vitals channels -- darkened enough here to stay
+   readable on a white background; a calmer red marks flagged/alarm states. */
 :root {
-  --bg: #0f1720;
-  --panel: #16212e;
-  --fg: #dbe4ee;
-  --muted: #8ea1b5;
-  --flow: #4fc3f7;
-  --press: #ff8a65;
-  --vol: #81c784;
-  --slope: #ba68c8;
-  --line: #2b3a4a;
-  --accent: #4fc3f7;
+  --bg: #f4f7fa;
+  --panel: #ffffff;
+  --fg: #1e293b;
+  --muted: #64748b;
+  --flow: #0891b2;
+  --press: #d97706;
+  --vol: #059669;
+  --slope: #7c3aed;
+  --line: #dbe4ea;
+  --accent: #0d9488;
+  --alert: #dc2626;
 }
 * {
   box-sizing: border-box;
@@ -74,8 +79,9 @@ label {
   margin-right: 4px;
 }
 select,
-input[type="number"] {
-  background: #0b1119;
+input[type="number"],
+input[type="text"] {
+  background: #eef2f6;
   color: var(--fg);
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -84,6 +90,9 @@ input[type="number"] {
 }
 input[type="number"] {
   width: 64px;
+}
+input[type="text"] {
+  width: 180px;
 }
 input:disabled,
 select:disabled {
@@ -174,7 +183,7 @@ aside h2 {
   flex-wrap: wrap;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-left: 3px solid #f44336;
+  border-left: 3px solid var(--alert);
   border-radius: 6px;
   padding: 10px 14px;
   text-decoration: none;
@@ -182,7 +191,7 @@ aside h2 {
   font-size: 13px;
 }
 .notif-card:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(15, 23, 42, 0.045);
 }
 .notif-type {
   font-weight: 600;
@@ -194,8 +203,8 @@ aside h2 {
 }
 .notif-badge {
   margin-left: auto;
-  background: rgba(244, 67, 54, 0.2);
-  color: #f44336;
+  background: rgba(220, 38, 38, 0.12);
+  color: var(--alert);
   border-radius: 4px;
   padding: 1px 8px;
   font-size: 11px;
@@ -218,9 +227,9 @@ aside h2 {
   align-items: center;
   gap: 8px;
   width: 100%;
-  background: #0b1119;
+  background: #eef2f6;
   border: 1px solid var(--line);
-  border-left: 3px solid #f44336;
+  border-left: 3px solid var(--alert);
   border-radius: 6px;
   padding: 6px 10px;
   font: inherit;
@@ -230,11 +239,11 @@ aside h2 {
   text-align: left;
 }
 .asy-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(15, 23, 42, 0.045);
 }
 .asy-item.active {
-  background: rgba(244, 67, 54, 0.18);
-  border-left-color: #ff8a80;
+  background: rgba(220, 38, 38, 0.12);
+  border-left-color: #b91c1c;
 }
 .asy-ratio {
   color: var(--muted);
@@ -257,7 +266,7 @@ aside h2 {
   cursor: pointer;
 }
 .pagination button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(15, 23, 42, 0.07);
 }
 .pagination button:disabled {
   opacity: 0.4;
@@ -273,17 +282,64 @@ aside h2 {
   margin-top: 0;
 }
 .page code {
-  background: #0b1119;
+  background: #eef2f6;
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 1px 5px;
   font-size: 12px;
 }
 .page pre {
-  background: #0b1119;
+  background: #eef2f6;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px 14px;
   overflow-x: auto;
   font-size: 12px;
+}
+
+/* ---- patients grid ---- */
+.patient-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.patient-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  text-decoration: none;
+  color: var(--fg);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.patient-card:hover {
+  background: rgba(15, 23, 42, 0.03);
+}
+.patient-card-id {
+  font-size: 13px;
+  font-weight: 600;
+}
+.patient-card-ai {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+}
+.patient-card-mp {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--fg);
+}
+.patient-card-ai-label {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 2px;
+}
+.patient-card-detail {
+  font-size: 12px;
+  color: var(--muted);
 }

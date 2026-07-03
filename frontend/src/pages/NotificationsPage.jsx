@@ -71,9 +71,10 @@ export default function NotificationsPage() {
           Detects <strong>double triggering</strong>, <strong>ineffective effort</strong>,{" "}
           <strong>auto-PEEP</strong>, and <strong>flow starvation</strong> across the dataset,
           plus per-patient <strong>mechanical power</strong> alerts (rolling average over the
-          trailing 24h, flagged at/above 17 J/min), all using fixed default settings. Click a
-          notification to inspect it in the Viewer, where detection can be tuned. See{" "}
-          <code>docs/asynchrony.md</code> for all five formulas.
+          trailing 24h, flagged at/above 17 J/min) and <strong>asynchrony index</strong> alerts
+          (flagged asynchrony time as a share of total waveform time, at/above 10%), all using
+          fixed default settings. Click a notification to inspect it in the Viewer, where
+          detection can be tuned. See <code>docs/asynchrony.md</code> for all six formulas.
         </p>
 
         <div className="field" style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 12 }}>

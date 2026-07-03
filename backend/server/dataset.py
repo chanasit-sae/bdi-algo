@@ -139,6 +139,8 @@ class Dataset:
     keyed by (patient_id, segmentation, window_hours) -- NOT by threshold, so
     the same number is reused whether it's being checked against 17.0 J/min
     via /api/notifications or a different threshold via /api/mechanical-power.
+    `ai_scans`/`asynchrony_index_cache` are the same pair of ideas again for
+    the per-patient asynchrony index (see _patient_asynchrony_index).
     """
 
     def __init__(self, data_dir: Path):
@@ -147,6 +149,7 @@ class Dataset:
         self.notification_scans: dict = {}
         self.mp_scans: dict = {}
         self.mp_cache: dict = {}
+        self.ai_scans: dict = {}
         self.asynchrony_index_cache: dict = {}
 
     @property

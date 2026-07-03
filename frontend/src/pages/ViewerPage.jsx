@@ -21,24 +21,10 @@ import {
   fsParamsFromSearchParams,
 } from "../lib/segmentation.js";
 import CaptureSelect from "../components/CaptureSelect.jsx";
-import ControlsBar from "../components/ControlsBar.jsx";
-import DoubleTriggerControls from "../components/DoubleTriggerControls.jsx";
-import IneffectiveEffortControls from "../components/IneffectiveEffortControls.jsx";
-import AutoPeepControls from "../components/AutoPeepControls.jsx";
-import FlowStarvationControls from "../components/FlowStarvationControls.jsx";
 import WaveformChart from "../components/WaveformChart.jsx";
 import MetadataPanel from "../components/MetadataPanel.jsx";
 import BreathPanel from "../components/BreathPanel.jsx";
 import AsynchronyPanel from "../components/AsynchronyPanel.jsx";
-import PatientSummaryPanel from "../components/PatientSummaryPanel.jsx";
-
-const DEFAULT_PARAMS = {
-  ...DEFAULT_SEGMENTATION_PARAMS,
-  ...DEFAULT_DT_PARAMS,
-  ...DEFAULT_IE_PARAMS,
-  ...DEFAULT_AP_PARAMS,
-  ...DEFAULT_FS_PARAMS,
-};
 
 export default function ViewerPage() {
   const [searchParams] = useSearchParams();
@@ -60,14 +46,11 @@ export default function ViewerPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [mpStatus, setMpStatus] = useState(null);
   const [mpLoading, setMpLoading] = useState(false);
-  const [patientSummary, setPatientSummary] = useState({}); // patient_id -> { mp, ai, loading }
   const [status, setStatus] = useState("");
 
   const appliedUrlCapture = useRef(false);
   const appliedUrlBreath = useRef(false);
   const appliedUrlEvent = useRef(false);
-
-  const set = (k, v) => setParams((p) => ({ ...p, [k]: v }));
 
   useEffect(() => {
     api
@@ -109,48 +92,6 @@ export default function ViewerPage() {
       cancelled = true;
     };
   }, [patientId]);
-
-  // Fetch MP + AI for every patient once the patient list is in, for the
-  // all-patients summary table. Each patient is fetched ONE AT A TIME (not
-  // all N fired concurrently) -- MP/AI are both heavy, real per-capture
-  // computations, and firing 2*N of them at once for every patient starves
-  // out the far lighter, more urgent waveform/breaths fetches for whatever
-  // capture is actually on screen. A row still updates as soon as its own
-  // patient resolves, so the table fills in progressively either way.
-  useEffect(() => {
-    if (!patients || !patients.length) {
-      setPatientSummary({});
-      return;
-    }
-    let cancelled = false;
-    setPatientSummary(
-      Object.fromEntries(patients.map((p) => [p.patient_id, { mp: null, ai: null, loading: true }]))
-    );
-    (async () => {
-      for (const p of patients) {
-        if (cancelled) return;
-        try {
-          const [mp, ai] = await Promise.all([api.mechanicalPower(p.patient_id), api.asynchronyIndex(p.patient_id)]);
-          if (cancelled) return;
-          setPatientSummary((prev) => ({
-            ...prev,
-            [p.patient_id]: { mp: mp.status ? mp.status.avg_mp_j_per_min : null, ai: ai.asynchrony_index, loading: false },
-          }));
-        } catch {
-          if (cancelled) return;
-          setPatientSummary((prev) => ({ ...prev, [p.patient_id]: { mp: null, ai: null, loading: false } }));
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [patients]);
-
-  const summaryRows = useMemo(
-    () => (patients || []).map((p) => ({ patient_id: p.patient_id, ...(patientSummary[p.patient_id] || { mp: null, ai: null, loading: true }) })),
-    [patients, patientSummary]
-  );
 
   // deep link: once patients load, jump straight to the notification's capture
   useEffect(() => {
@@ -274,6 +215,17 @@ export default function ViewerPage() {
     if (idx >= 0) setBreathIdx(idx);
   }
 
+  // clicking a breath segment directly on any waveform chart selects it,
+  // same as picking it from the Breath dropdown -- and clears any active
+  // asynchrony highlight, since this is a plain manual pick, not a click
+  // on a flagged event.
+  function selectBreathAtTime(time) {
+    const idx = breaths.findIndex((b) => time >= b.t_insp_start && time <= b.t_exp_end);
+    if (idx < 0) return;
+    setBreathIdx(idx);
+    setActiveEventIdx(-1);
+  }
+
   const highlights = useMemo(
     () =>
       asyncEvents.map((e, i) => ({
@@ -317,14 +269,8 @@ export default function ViewerPage() {
             ))}
           </select>
         </div>
-        <span className="muted">{status}</span>
       </div>
-
-      <ControlsBar params={params} set={set} />
-      <DoubleTriggerControls params={params} set={set} />
-      <IneffectiveEffortControls params={params} set={set} />
-      <AutoPeepControls params={params} set={set} />
-      <FlowStarvationControls params={params} set={set} />
+      <p className="muted" style={{ margin: "0 18px 12px", fontSize: 12 }}>{status}</p>
 
       <main className="viewer">
         <div className="charts">
@@ -337,6 +283,7 @@ export default function ViewerPage() {
             sel={sel}
             baseVal={baselineVal}
             highlights={highlights}
+            onSelectTime={selectBreathAtTime}
           />
           <WaveformChart
             title="Pressure (cmH2O)"
@@ -346,6 +293,7 @@ export default function ViewerPage() {
             breaths={breaths}
             sel={sel}
             highlights={highlights}
+            onSelectTime={selectBreathAtTime}
           />
           <WaveformChart
             title="Volume (mL)"
@@ -355,6 +303,7 @@ export default function ViewerPage() {
             breaths={breaths}
             sel={sel}
             highlights={highlights}
+            onSelectTime={selectBreathAtTime}
           />
           <WaveformChart
             title="Flow slope (L/min/s)"
@@ -365,6 +314,7 @@ export default function ViewerPage() {
             sel={sel}
             baseVal={slopeRef || null}
             highlights={highlights}
+            onSelectTime={selectBreathAtTime}
           />
         </div>
         <aside>
@@ -381,8 +331,6 @@ export default function ViewerPage() {
           <AsynchronyPanel events={asyncEvents} activeIdx={activeEventIdx} onSelect={selectEvent} />
           <h2 style={{ marginTop: 16 }}>Breath</h2>
           <BreathPanel breath={sel} />
-          <h2 style={{ marginTop: 16 }}>Patients (MP / AI%)</h2>
-          <PatientSummaryPanel rows={summaryRows} selectedId={patientId} />
         </aside>
       </main>
     </>

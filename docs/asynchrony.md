@@ -7,17 +7,19 @@
 **Deps:** numpy + pandas (reuse `breath_segment.py` output)
 **API:** `backend/server/routers/asynchrony.py` — `GET /api/asynchrony` (one capture,
 every breath-level detector), `GET /api/auto-peep` and `GET /api/flow-starvation` (one
-capture, single detector each), `GET /api/mechanical-power` (per-patient), and
-`GET /api/notifications` (scans the dataset, paginated, includes mechanical power)
+capture, single detector each), `GET /api/mechanical-power` and `GET /api/asynchrony-index`
+(both per-patient), and `GET /api/notifications` (scans the dataset, paginated, includes
+mechanical power and asynchrony-index alerts)
 **Pages:**
 - **Notifications** (`frontend/src/pages/NotificationsPage.jsx`) — a plain, most-recent-first
   list of every flagged event across the whole dataset, 10 per page, using fixed default
-  detection settings. No tunable controls here on purpose — click a notification to
-  inspect and tune it in the Viewer.
+  detection settings, with a type filter (checkboxes). No tunable formula controls here on
+  purpose — click a notification to inspect it in the Viewer.
 - **Viewer** (`frontend/src/pages/ViewerPage.jsx`) — independently detects and highlights
   **every** flagged breath-level event (all four detectors) for whatever capture is
-  currently loaded, with its own Baseline/DT-formula/IE-formula/AP-formula/FS-formula
-  controls. Clicking a notification deep-links here with the exact segmentation *and*
+  currently loaded, using fixed default segmentation/formula params (no tuning controls
+  shown to the user — see git history if you need to bring them back). Clicking a
+  notification deep-links here with the exact segmentation *and*
   every formula reproduced, so the same event is guaranteed to be found again and marked
   active (brighter band). Mechanical power has no per-breath band to highlight (it's a
   patient-level rolling average, see §5) — clicking its notification lands on the
@@ -258,6 +260,27 @@ below threshold (e.g. `bd496321...` at 12.15 J/min).
 
 ---
 
+## 6. Asynchrony index alert
+
+The simplest of the six: a per-patient alert on the **asynchrony index** itself (§ above the
+API section describes the metric — total flagged-event seconds / total waveform seconds
+across a patient's connected captures). Flagged once that ratio reaches `ai_threshold`
+(default **10%**). Like mechanical power, this is patient-level, not per-capture, so it has
+no `t0`/`t1` span and no breath to select — its notification links to the patient's most
+recent capture with nothing pre-selected.
+
+Note the query param is `ai_threshold`, not `threshold` — `mp_params` already owns
+`threshold` (mechanical power's), and since both dependencies are combined on the same
+`/api/notifications`/`/api/asynchrony` endpoints, FastAPI binds same-named query params from
+different `Depends()` to the same key. Verified this was a real collision (`?threshold=5` was
+silently setting both MP's and AI's threshold at once) before aliasing AI's to `ai_threshold`.
+
+On the sample dataset: **1** patient (`2a7b9f18...`) flagged at 10.7%, matching the same
+patient already flagged for mechanical power -- consistent with it also being the one with
+the most ineffective-effort events.
+
+---
+
 ## On the sample dataset (double-triggering)
 Under the app's recommended segmentation (`baseline="slope"`) and the clinical default
 `ratio=0.5`, double-triggering produces **zero** flagged pairs on this sample — the ~68
@@ -409,7 +432,7 @@ The Notifications page builds, per card:
     &flow_prominence=&flow_prominence_max=&pressure_prominence=&concurrent_tol_sec=&bump_lookback_sec=
     &flow_frac=&flow_abs=&peep_min=&require_pressure=
     &dip_prominence=&lookback_sec=&require_constant_flow=&flow_range_max=
-    &threshold=&window_hours=
+    &threshold=&window_hours=&ai_threshold=
 ```
 The Viewer reads this once on mount: selects the owning patient/capture, applies the same
 segmentation and **every** formula, and selects `breath_idx_a` in the breath dropdown. It
@@ -421,14 +444,14 @@ reappears in the Viewer's fresh scan — deriving the highlight from a live per-
 fetch (rather than storing raw `t0`/`t1` seconds from the notification itself) means
 switching capture/patient can never leave a stale band on the wrong waveform.
 
-A `type: "mechanical_power"` notification's link omits `breath` entirely (there's no single
-breath to select) — `n.breath_idx_a` is absent on that notification type, and
-`NotificationList.jsx`'s `viewerLink()` only sets the `breath` param when it's present. It
-still lands on `raw_data` = the patient's most recent capture (`status.latest_raw_data`),
-just with no breath pre-selected and nothing highlighted, since mechanical power isn't part
-of `/api/asynchrony`'s `events` (see §5 — it's patient-level). `threshold`/`window_hours`
-still round-trip through the link for consistency even though the Viewer doesn't currently
-act on them.
+A `type: "mechanical_power"` or `type: "asynchrony_index"` notification's link omits `breath`
+entirely (there's no single breath to select) — `n.breath_idx_a` is absent on both
+notification types, and `NotificationList.jsx`'s `viewerLink()` only sets the `breath` param
+when it's present. Both still land on `raw_data` = the patient's most recent capture, just
+with no breath pre-selected and nothing highlighted, since neither is part of
+`/api/asynchrony`'s `events` (see §5/§6 — both are patient-level). `threshold`/`window_hours`/
+`ai_threshold` still round-trip through the link for consistency even though the Viewer
+doesn't currently act on them.
 
 ## CLI
 ```bash

@@ -1,16 +1,34 @@
 // Canvas waveform renderer, ported from the original viz_server drawChart.
 // Pure function of (canvas, data) so it can be called from a React effect.
 
+// Healthcare / light-clinical palette -- must mirror the CSS variables in
+// styles.css (--flow/--press/--vol/--slope/--alert); canvas can't read CSS
+// custom properties directly, so these are kept in sync by hand. Colors are
+// darkened relative to a dark-theme palette so they stay readable on white.
 export const COLORS = {
-  flow: "#4fc3f7",
-  pressure: "#ff8a65",
-  volume: "#81c784",
-  slope: "#ba68c8",
+  flow: "#0891b2",
+  pressure: "#d97706",
+  volume: "#059669",
+  slope: "#7c3aed",
 };
-const INSP_FILL = "rgba(79,195,247,0.13)"; // inspiration band
-const EXP_FILL = "rgba(255,138,101,0.13)"; // expiration band
-const FLAG_FILL = "rgba(244,67,54,0.20)"; // flagged event band (e.g. double-trigger)
-const FLAG_STROKE = "#f44336";
+const INSP_FILL = "rgba(8,145,178,0.08)"; // inspiration band
+const EXP_FILL = "rgba(217,119,6,0.08)"; // expiration band
+const FLAG_FILL = "rgba(220,38,38,0.14)"; // flagged event band (e.g. double-trigger)
+const FLAG_STROKE = "#dc2626";
+
+// Plot-area padding (px) -- exported so click handling (WaveformChart) can
+// invert exactly the same x -> time mapping drawChart uses, without the two
+// ever drifting apart.
+export const PAD = { L: 46, R: 8, T: 8, B: 20 };
+
+// Inverse of drawChart's `Xt`: canvas-relative click x (px, CSS pixels, not
+// device pixels) -> time (s). `canvas` is only used for its CSS width.
+export function pixelXToTime(canvas, t, xPx) {
+  const w = canvas.clientWidth;
+  const plotW = w - PAD.L - PAD.R;
+  const tmax = (t && t[t.length - 1]) || 1;
+  return ((xPx - PAD.L) / plotW) * tmax;
+}
 
 export function drawChart(canvas, { t, y, color, breaths, sel, baseVal, highlights }) {
   if (!canvas) return;
@@ -22,10 +40,10 @@ export function drawChart(canvas, { t, y, color, breaths, sel, baseVal, highligh
   const ctx = canvas.getContext("2d");
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, w, h);
-  const padL = 46,
-    padR = 8,
-    padT = 8,
-    padB = 20;
+  const padL = PAD.L,
+    padR = PAD.R,
+    padT = PAD.T,
+    padB = PAD.B;
   const plotW = w - padL - padR;
   const plotH = h - padT - padB;
   if (!y || !y.length) return;
@@ -51,7 +69,7 @@ export function drawChart(canvas, { t, y, color, breaths, sel, baseVal, highligh
     for (const hl of highlights) {
       const x0 = Xt(hl.t0),
         x1 = Xt(hl.t1);
-      ctx.fillStyle = hl.active ? "rgba(244,67,54,0.32)" : FLAG_FILL;
+      ctx.fillStyle = hl.active ? "rgba(220,38,38,0.28)" : FLAG_FILL;
       ctx.fillRect(x0, padT, x1 - x0, plotH);
       ctx.strokeStyle = FLAG_STROKE;
       ctx.lineWidth = hl.active ? 2 : 1;
@@ -60,7 +78,7 @@ export function drawChart(canvas, { t, y, color, breaths, sel, baseVal, highligh
   }
   // faint breath-boundary lines (inspiration onsets)
   if (breaths && breaths.length) {
-    ctx.strokeStyle = "#3a4c60";
+    ctx.strokeStyle = "#dbe4ea";
     ctx.lineWidth = 1;
     for (const b of breaths) {
       const x = Xt(b.t_insp_start);
@@ -71,8 +89,8 @@ export function drawChart(canvas, { t, y, color, breaths, sel, baseVal, highligh
     }
   }
   // grid + y labels
-  ctx.strokeStyle = "#2b3a4a";
-  ctx.fillStyle = "#8ea1b5";
+  ctx.strokeStyle = "#e5eaef";
+  ctx.fillStyle = "#64748b";
   ctx.font = "11px system-ui";
   ctx.lineWidth = 1;
   for (let g = 0; g <= 4; g++) {
@@ -85,7 +103,7 @@ export function drawChart(canvas, { t, y, color, breaths, sel, baseVal, highligh
     ctx.fillText(val.toFixed(0), 4, yy + 3);
   }
   if (ymin < 0 && ymax > 0) {
-    ctx.strokeStyle = "#43586e";
+    ctx.strokeStyle = "#b8c4cc";
     ctx.beginPath();
     ctx.moveTo(padL, Y(0));
     ctx.lineTo(w - padR, Y(0));
@@ -93,17 +111,17 @@ export function drawChart(canvas, { t, y, color, breaths, sel, baseVal, highligh
   }
   // crossing baseline (dashed) — the level segmentation splits insp/exp on it
   if (baseVal != null && baseVal > ymin && baseVal < ymax) {
-    ctx.strokeStyle = "#d08770";
+    ctx.strokeStyle = "#ea580c";
     ctx.setLineDash([4, 3]);
     ctx.beginPath();
     ctx.moveTo(padL, Y(baseVal));
     ctx.lineTo(w - padR, Y(baseVal));
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = "#d08770";
+    ctx.fillStyle = "#ea580c";
     ctx.fillText(baseVal.toFixed(1), padL + 2, Y(baseVal) - 3);
   }
-  ctx.fillStyle = "#8ea1b5";
+  ctx.fillStyle = "#64748b";
   ctx.fillText("0s", padL, h - 6);
   ctx.fillText(tmax.toFixed(1) + "s", w - padR - 24, h - 6);
   // series
