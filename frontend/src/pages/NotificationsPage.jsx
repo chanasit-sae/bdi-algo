@@ -26,7 +26,8 @@ export default function NotificationsPage() {
         setNotifications(d.notifications);
         setFormula(d.formula);
         setTotalPages(d.total_pages);
-        setStatus(`${d.total} total across ${d.scanned_captures} captures scanned`);
+        const found = `${d.total} found across ${d.scanned_captures} captures scanned`;
+        setStatus(d.scan_complete ? found : `${found} (still scanning older captures…)`);
       })
       .catch((e) => !cancelled && setStatus("error: " + e.message));
     return () => {
@@ -45,10 +46,10 @@ export default function NotificationsPage() {
           Notifications
         </h2>
         <p className="muted" style={{ fontSize: 12, maxWidth: 760 }}>
-          Detects <strong>double triggering</strong> and <strong>ineffective effort</strong> across
-          the dataset using fixed default settings. Click a notification to inspect the flagged
-          breaths in the Viewer, where detection can be tuned. See <code>docs/asynchrony.md</code>{" "}
-          for both formulas.
+          Detects <strong>double triggering</strong>, <strong>ineffective effort</strong>, and{" "}
+          <strong>auto-PEEP</strong> across the dataset using fixed default settings. Click a
+          notification to inspect the flagged breaths in the Viewer, where detection can be
+          tuned. See <code>docs/asynchrony.md</code> for all three formulas.
         </p>
 
         {formula && <NotificationList notifications={notifications} formula={formula} />}

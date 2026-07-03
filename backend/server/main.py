@@ -10,6 +10,7 @@ serve the static files from frontend/dist, so the whole app runs on one port.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -38,6 +39,21 @@ class SPAStaticFiles(StaticFiles):
             raise
 
 
+async def _warmup_notifications(ds: Dataset) -> None:
+    """Advance the Notifications page's default asynchrony scan toward
+    completion in the background, off the startup path — a slow/huge dataset
+    then delays only this one (self-healing) cache, not the whole app's
+    availability. Runs in a thread since the scan itself is sync CPU/IO work;
+    live requests race the same shared scan state and cooperate with it (see
+    NotificationScan in dataset.py), so nothing here is wasted duplicate work.
+    """
+    try:
+        await asyncio.to_thread(asynchrony.warmup_notifications, ds)
+        print("notifications scan complete (background warmup)")
+    except Exception as e:  # non-fatal: live requests still advance the same scan themselves
+        print(f"notifications warmup stopped early (non-fatal): {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Build the (potentially slow) dataset index once at startup.
@@ -45,6 +61,7 @@ async def lifespan(app: FastAPI):
     _ = ds.index  # force the build so the first request is fast
     app.state.dataset = ds
     print(f"loaded {len(ds.patients)} patients, {ds.n_captures()} captures from {DATA_DIR}")
+    asyncio.create_task(_warmup_notifications(ds))
     yield
 
 

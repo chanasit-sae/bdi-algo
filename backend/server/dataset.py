@@ -8,6 +8,7 @@ connected / disconnected. The index is built once at startup and cached.
 from __future__ import annotations
 
 import math
+import threading
 from pathlib import Path
 
 from parser import load_dataset, metadata_frame, load_waveform
@@ -81,12 +82,60 @@ def build_index(data_dir: Path) -> dict:
     return {"patients": list(patients.values()), "valid": valid}
 
 
+class NotificationScan:
+    """Incrementally-built asynchrony scan for one parameter combination.
+
+    `pending` is every (patient, capture) pair this scan covers, sorted
+    most-recent-first *once* up front (cheap — metadata only, no waveform
+    loading). Captures are then claimed and processed one at a time by
+    whichever caller needs more: a request only advances far enough to
+    fill the page it asked for, and a found event is appended straight to
+    `results` and never recomputed. The background startup warmup and live
+    page requests share and advance the exact same state, so whichever
+    finishes a capture first is credited — no duplicate work either way.
+    """
+
+    def __init__(self, pending: list[tuple[dict, dict]]):
+        self.pending = pending
+        self.cursor = 0
+        self.results: list[dict] = []
+        self.scanned = 0
+        self.complete = not pending
+        self.lock = threading.Lock()
+
+    def claim_next(self) -> tuple[dict, dict] | None:
+        """Atomically take the next unclaimed (patient, capture) pair, or
+        None once every pair has been claimed (marks the scan complete)."""
+        with self.lock:
+            if self.cursor >= len(self.pending):
+                self.complete = True
+                return None
+            item = self.pending[self.cursor]
+            self.cursor += 1
+            return item
+
+    def add_result(self, notification: dict) -> None:
+        with self.lock:
+            self.results.append(notification)
+
+    def mark_scanned(self) -> None:
+        with self.lock:
+            self.scanned += 1
+
+
 class Dataset:
-    """Lazily-built, cached dataset index for the running server."""
+    """Lazily-built, cached dataset index for the running server.
+
+    `notification_scans` holds one NotificationScan per distinct set of
+    detection params the asynchrony router has ever been asked for — owned
+    here (rather than module-level in the router) so it lives and dies with
+    this one server process/instance, same as `_index`.
+    """
 
     def __init__(self, data_dir: Path):
         self.data_dir = data_dir
         self._index: dict | None = None
+        self.notification_scans: dict = {}
 
     @property
     def index(self) -> dict:

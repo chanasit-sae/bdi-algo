@@ -208,7 +208,7 @@ Same shape as `/api/double-triggers` (superseded by `/api/asynchrony` above) but
 one detector — mirrors [auto-peep.md](../auto-peep.md)'s own API section exactly, for
 callers that only want this detector without running the other two.
 
-### `GET /api/notifications` — scan + paginate
+### `GET /api/notifications` — incremental scan + paginate
 ```
 GET /api/notifications?<same params as above>
     &patient_id=<optional, restrict to one patient>
@@ -216,22 +216,44 @@ GET /api/notifications?<same params as above>
                                   # events, so they're skipped by default for speed
     &page=1&page_size=10
 ```
-Loops every capture (or one patient's), runs `_scan_capture()` (all three detectors) on
-each, and returns one page of the flattened, most-recent-first list (sorted by capture `day`
-desc, then `time` desc — captures don't carry an absolute date, so cross-patient ordering
-is approximate). Each notification adds `patient_id`/`raw_data`/`day`/`time` plus the
-`segmentation` params used:
+Backed by a `NotificationScan` (`backend/server/dataset.py`), one per distinct combination
+of every param that affects the result. On first use for a given param set, captures are
+sorted most-recent-first **once** (metadata only, no waveform loading — cheap regardless of
+dataset size) into a pending queue. From there the scan is **lazy and incremental**: a
+request only claims and processes pending captures, one at a time, until it has found at
+least `page * page_size` events, then stops — it never scans the whole dataset just to
+answer page 1. Each event found is appended straight to the scan's shared `results` list the
+moment it's found, so a capture is never re-processed for the same params, whether by a
+later page request or the background warmup below. Concurrent callers (e.g. a live request
+racing the warmup) claim different captures under a lock but do the actual
+load-and-detect work outside it, so they don't block each other for long.
+
+A background task started in `main.py`'s lifespan (`asyncio.to_thread`, so it doesn't
+block the app from accepting requests) advances the *default* param combination — the only
+one the Notifications page ever asks for, since it has no tunable controls — all the way to
+completion. In practice this means the first real visitor rarely waits on a cold scan at
+all, and every request after the scan completes is an instant slice of an already-built list.
+
+Response adds a `scanned_captures` count and a `scan_complete` flag (false if the scan
+hasn't reached the end of its pending queue yet — `total`/`total_pages` are accurate as far
+as scanned so far, but may still grow):
 ```json
 {
   "notifications": [ { "type": "ineffective_effort", "patient_id": "...", "raw_data": "....csv",
                         "day": 14, "time": "11:18:25", "t0": ..., "t1": ..., "detail": "...",
                         "breath_idx_a": 0, "breath_idx_b": 1, ...,
                         "segmentation": { "baseline": "slope", "hysteresis": 0.0, ... } } ],
-  "page": 1, "page_size": 10, "total": 17, "total_pages": 2,
-  "scanned_captures": 40,
+  "page": 1, "page_size": 10, "total": 18, "total_pages": 2,
+  "scanned_captures": 40, "scan_complete": true,
   "formula": { "double_trigger": {...}, "ineffective_effort": {...}, "auto_peep": {...} }
 }
 ```
+Verified on the local sample: a `page_size=1` request on a fresh (unwarmed) param
+combination scanned just **1** capture before returning; asking the same scan for more
+(`page_size=10`) resumed and scanned only **2 more** (not from scratch); forcing full
+completion (`page_size=100`) scanned all **68** and set `scan_complete: true`; five
+concurrent requests against a fresh scan all returned identical, consistent counts (no
+duplicate work, no corruption).
 
 ### The Viewer deep link
 The Notifications page builds, per card:
