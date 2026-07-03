@@ -1,4 +1,5 @@
 import ViewerPage from "./pages/ViewerPage.jsx";
+import DoubleTriggerPage from "./pages/DoubleTriggerPage.jsx";
 import AboutPage from "./pages/AboutPage.jsx";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -12,6 +13,7 @@ import AboutPage from "./pages/AboutPage.jsx";
 // ─────────────────────────────────────────────────────────────────────────────
 const routes = [
   { path: "/", label: "Viewer", element: <ViewerPage /> },
+  { path: "/double-trigger", label: "Double Trigger", element: <DoubleTriggerPage /> },
   { path: "/about", label: "About", element: <AboutPage /> },
 ];
 

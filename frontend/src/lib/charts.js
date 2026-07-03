@@ -9,8 +9,10 @@ export const COLORS = {
 };
 const INSP_FILL = "rgba(79,195,247,0.13)"; // inspiration band
 const EXP_FILL = "rgba(255,138,101,0.13)"; // expiration band
+const FLAG_FILL = "rgba(244,67,54,0.20)"; // flagged event band (e.g. double-trigger)
+const FLAG_STROKE = "#f44336";
 
-export function drawChart(canvas, { t, y, color, breaths, sel, baseVal }) {
+export function drawChart(canvas, { t, y, color, breaths, sel, baseVal, highlights }) {
   if (!canvas) return;
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth;
@@ -43,6 +45,18 @@ export function drawChart(canvas, { t, y, color, breaths, sel, baseVal }) {
     ctx.fillRect(Xt(sel.t_insp_start), padT, Xt(sel.t_insp_end) - Xt(sel.t_insp_start), plotH);
     ctx.fillStyle = EXP_FILL;
     ctx.fillRect(Xt(sel.t_insp_end), padT, Xt(sel.t_exp_end) - Xt(sel.t_insp_end), plotH);
+  }
+  // flagged-event bands (e.g. double-triggered breath pairs), drawn under everything else
+  if (highlights && highlights.length) {
+    for (const hl of highlights) {
+      const x0 = Xt(hl.t0),
+        x1 = Xt(hl.t1);
+      ctx.fillStyle = hl.active ? "rgba(244,67,54,0.32)" : FLAG_FILL;
+      ctx.fillRect(x0, padT, x1 - x0, plotH);
+      ctx.strokeStyle = FLAG_STROKE;
+      ctx.lineWidth = hl.active ? 2 : 1;
+      ctx.strokeRect(x0, padT, x1 - x0, plotH);
+    }
   }
   // faint breath-boundary lines (inspiration onsets)
   if (breaths && breaths.length) {

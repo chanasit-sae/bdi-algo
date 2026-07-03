@@ -79,20 +79,26 @@ backend/
     config.py          # data dir + paths
     dataset.py         # patient/capture index (cached at startup)
     deps.py            # shared FastAPI dependencies
+    util.py            # require_valid / as_float (shared by routers)
+    segmentation.py     # segment_from_params (shared breath-segmentation call)
     routers/
       waveform.py      # /api/index, /api/waveform, /api/breaths
+      asynchrony.py    # /api/double-triggers (see docs/asynchrony.md)
   parser.py            # (unchanged) metadata + CSV loading
   breath_segment.py    # (unchanged) segmentation algorithm
   breath_metrics.py    # (unchanged) derived per-breath metrics
+  asynchrony.py        # double-triggering detection formula
   requirements.txt
 frontend/
   src/
     routes.jsx         # <-- register pages here (nav + router are generated)
     App.jsx            # app shell / nav
-    pages/             # one file per page (ViewerPage, AboutPage, …)
-    components/        # ControlsBar, WaveformChart, panels, …
+    pages/             # one file per page (ViewerPage, DoubleTriggerPage, AboutPage, …)
+    components/        # ControlsBar, WaveformChart, CaptureSelect, panels, …
     lib/api.js         # fetch helpers for /api
-    lib/charts.js      # canvas waveform renderer
+    lib/charts.js      # canvas waveform renderer (+ event-highlight bands)
+    lib/usePatientCapture.js  # shared patient/capture selection state
+    lib/segmentation.js       # shared segmentation-param defaults + query mapping
 ```
 
 ## Adding a page

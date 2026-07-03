@@ -21,7 +21,7 @@ from starlette.responses import FileResponse
 
 from .config import DATA_DIR, FRONTEND_DIST
 from .dataset import Dataset
-from .routers import waveform
+from .routers import waveform, asynchrony
 
 
 class SPAStaticFiles(StaticFiles):
@@ -65,6 +65,7 @@ app.add_middleware(
 # To add a new API area, create backend/server/routers/<name>.py with an
 # APIRouter and include it here.
 app.include_router(waveform.router)
+app.include_router(asynchrony.router)
 
 
 @app.get("/api/health")

@@ -157,6 +157,33 @@ aside h2 {
   color: var(--muted);
 }
 
+/* ---- double-trigger events table ---- */
+.dt-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+.dt-table th,
+.dt-table td {
+  padding: 6px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+.dt-table th {
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dt-table tbody tr {
+  cursor: pointer;
+}
+.dt-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.dt-table tbody tr.active {
+  background: rgba(244, 67, 54, 0.15);
+}
+
 /* ---- generic page (about etc.) ---- */
 .page {
   padding: 24px;
