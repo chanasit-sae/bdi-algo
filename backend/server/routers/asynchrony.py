@@ -2,18 +2,22 @@
 
     GET /api/asynchrony?file=...&<segmentation>&<double-trigger>&<ineffective-effort>&<auto-peep>&<flow-starvation>
     GET /api/auto-peep?file=...&<segmentation>&<auto-peep formula>   (single capture, auto-PEEP only)
+    GET /api/flow-starvation?file=...&<segmentation>&<flow-starvation formula>   (single capture, flow-starvation only)
+    GET /api/mechanical-power?<segmentation>&<mp formula>&patient_id=&include_disconnected=   (per-patient, not per-capture)
     GET /api/notifications?<same params>&patient_id=&include_disconnected=&page=&page_size=
 
 Segmentation query params are identical to /api/breaths (event timing comes
 directly from the chosen breath boundaries). See backend/asynchrony.py,
-backend/ineffective_effort.py, backend/auto_peep.py, and
-backend/flow_starvation.py for the four detection formulas.
+backend/ineffective_effort.py, backend/auto_peep.py, backend/flow_starvation.py,
+and backend/mechanical_power.py for the five detection formulas.
 
 Every event, regardless of `type`, carries two generalized fields so the
 frontend never needs per-type branching: `t0`/`t1` (the span to highlight on
 a chart) and `detail` (a short human-readable summary). Type-specific raw
 fields (te_gap, flow_prominence, peep_delta, ...) are also included for
-anyone who wants the full detail.
+anyone who wants the full detail. Mechanical power is the one exception to
+"a chart span" -- it's a per-patient rolling average, not a single breath
+event, so its `t0`/`t1` are null; see mechanical_power.py.
 
 /api/notifications is backed by a `NotificationScan` (see dataset.py): captures
 are sorted most-recent-first once, then scanned lazily, one at a time, with
@@ -22,7 +26,10 @@ only advances the scan until it has enough results to answer that page, so
 opening the Notifications page never waits on the whole dataset, and no
 capture is ever scanned twice for the same params. A background task started
 at server boot (main.py) advances the same shared scan toward completion, so
-later requests increasingly find it already done.
+later requests increasingly find it already done. Mechanical power is merged
+in alongside it, computed per-patient and cached in `ds.mp_cache` (see
+_patient_mp_raw) rather than advanced incrementally, since it needs a
+patient's whole rolling window, not one capture at a time, to mean anything.
 """
 
 from __future__ import annotations
@@ -34,6 +41,7 @@ from asynchrony import detect_double_triggers
 from ineffective_effort import detect_ineffective_efforts
 from auto_peep import detect_auto_peep
 from flow_starvation import detect_flow_starvation
+from mechanical_power import capture_hours, compute_breath_mp, rolling_patient_mp
 
 from ..dataset import Dataset, NotificationScan, denan
 from ..deps import get_dataset
@@ -115,6 +123,13 @@ def flow_starvation_params(
     }
 
 
+def mp_params(
+    threshold: float = Query(17.0, ge=0.0, description="alert once a patient's trailing rolling-average mechanical power (J/min) reaches this; Serpa Neto et al. 2018 puts elevated mortality risk around 17-19 J/min"),
+    window_hours: float = Query(24.0, gt=0.0, description="trailing window (hours), ending at the patient's most recent capture, the rolling average is computed over"),
+) -> dict:
+    return {"threshold": threshold, "window_hours": window_hours}
+
+
 def _scan_capture(wf, fname: str, seg: dict, dt: dict, ie: dict, ap: dict, fs: dict) -> tuple[list[dict], float, int]:
     """Run every detector on one capture's waveform; returns (events, baseline, n_breaths)."""
     breaths, base_val = segment_from_params(
@@ -188,13 +203,91 @@ def _scan_capture(wf, fname: str, seg: dict, dt: dict, ie: dict, ap: dict, fs: d
     return events, base_val, len(breaths)
 
 
-def _formula_block(dt: dict, ie: dict, ap: dict, fs: dict) -> dict:
+def _formula_block(dt: dict, ie: dict, ap: dict, fs: dict, mp: dict) -> dict:
     return {
         "double_trigger": {"criterion": "te_gap < ratio * ti_ref", **dt},
         "ineffective_effort": {"criterion": "concordant flow-bump + pressure-dip within concurrent_tol_sec", **ie},
         "auto_peep": {"criterion": "flow_residual_frac > flow_frac (+ peep_delta > peep_min)", **ap},
         "flow_starvation": {"criterion": "rise-dip-rise notch in inspiratory pressure, both sides >= dip_prominence", **fs},
+        "mechanical_power": {"criterion": "trailing rolling-average mp_j_per_min >= threshold", **mp},
     }
+
+
+def _patient_mp_raw(ds: Dataset, seg: dict, patient: dict, window_hours: float, include_disconnected: bool) -> dict | None:
+    """Trailing rolling-average mechanical power for one patient, cached per
+    (patient, segmentation, window) -- NOT per threshold, so the same raw
+    number can be reused whether it's being checked against 17.0 or 20.0.
+
+    Captures are walked most-recent-first and stop as soon as one falls more
+    than `window_hours` before the patient's latest capture -- the same
+    early-exit bounding idea as `NotificationScan`, just per-patient instead
+    of dataset-wide, since a rolling average never needs captures outside its
+    own window.
+    """
+    key = (patient["patient_id"], tuple(sorted(seg.items())), window_hours, include_disconnected)
+    if key in ds.mp_cache:
+        return ds.mp_cache[key]
+
+    caps = sorted(patient["captures"], key=_capture_sort_key, reverse=True)
+    if not include_disconnected:
+        caps = [c for c in caps if c["connected"]]
+
+    accumulated = []
+    cutoff = None
+    for c in caps:
+        h = capture_hours(c["day"], c["time"])
+        if cutoff is None:
+            cutoff = h - window_hours
+        elif h < cutoff:
+            break
+        wf = load_waveform(ds.data_dir / c["raw_data"])
+        breaths, _base_val = segment_from_params(
+            wf, c["raw_data"], seg["baseline"], seg["hysteresis"], seg["slope"], seg["sdelta"],
+            seg["swin"], seg["srefr"], seg["sguard"], seg["speak_val"],
+        )
+        mp_df = compute_breath_mp(breaths, wf["pressure"].to_numpy(), wf["volume"].to_numpy())
+        accumulated.append((c["day"], c["time"], c["raw_data"], mp_df))
+
+    status = rolling_patient_mp(accumulated, window_hours=window_hours)
+    ds.mp_cache[key] = status
+    return status
+
+
+def _mp_notification(patient: dict, status: dict | None, threshold: float, window_hours: float, seg: dict) -> dict | None:
+    """Notification-shaped dict for one patient's MP status, or None if
+    there's no status yet or it's below threshold."""
+    if status is None or status["avg_mp_j_per_min"] < threshold:
+        return None
+    return {
+        "type": "mechanical_power",
+        "patient_id": patient["patient_id"],
+        "raw_data": status["latest_raw_data"],
+        "day": status["latest_day"],
+        "time": status["latest_time"],
+        "t0": None,
+        "t1": None,
+        "detail": f"avg {status['avg_mp_j_per_min']:.1f} J/min over {status['n_breaths']} breaths ({window_hours:.0f}h window)",
+        "avg_mp_j_per_min": status["avg_mp_j_per_min"],
+        "n_breaths": status["n_breaths"],
+        "n_captures_total": status["n_captures_total"],
+        "threshold": threshold,
+        "window_hours": window_hours,
+        "segmentation": {k: seg[k] for k in _SEG_KEYS},
+    }
+
+
+def _all_patient_mp_notifications(
+    ds: Dataset, seg: dict, mp: dict, patient_id: str | None, include_disconnected: bool
+) -> list[dict]:
+    out = []
+    for p in ds.patients:
+        if patient_id and p["patient_id"] != patient_id:
+            continue
+        status = _patient_mp_raw(ds, seg, p, mp["window_hours"], include_disconnected)
+        notif = _mp_notification(p, status, mp["threshold"], mp["window_hours"], seg)
+        if notif is not None:
+            out.append(notif)
+    return out
 
 
 @router.get("/asynchrony")
@@ -205,9 +298,14 @@ def get_asynchrony(
     ie: dict = Depends(ie_params),
     ap: dict = Depends(auto_peep_params),
     fs: dict = Depends(flow_starvation_params),
+    mp: dict = Depends(mp_params),
     ds: Dataset = Depends(get_dataset),
 ):
-    """All asynchrony events (every detector) for one capture."""
+    """All asynchrony events (every detector) for one capture. Mechanical
+    power is patient-level (not per-capture) so it isn't in `events` here --
+    see /api/mechanical-power or /api/notifications -- but its params still
+    round-trip through `formula` so a notification's deep link stays intact.
+    """
     require_valid(ds, file)
     wf = load_waveform(ds.data_dir / file)
     events, base_val, n_breaths = _scan_capture(wf, file, seg, dt, ie, ap, fs)
@@ -215,7 +313,7 @@ def get_asynchrony(
         "events": events,
         "n_breaths": n_breaths,
         "baseline": base_val,
-        "formula": _formula_block(dt, ie, ap, fs),
+        "formula": _formula_block(dt, ie, ap, fs, mp),
     })
 
 
@@ -270,6 +368,44 @@ def get_flow_starvation_only(
         "n_breaths": len(breaths),
         "baseline": base_val,
         "formula": {"criterion": "rise-dip-rise notch in inspiratory pressure, both sides >= dip_prominence", **fs},
+    })
+
+
+@router.get("/mechanical-power")
+def get_mechanical_power(
+    seg: dict = Depends(segmentation_params),
+    mp: dict = Depends(mp_params),
+    patient_id: str | None = Query(None, description="one patient's status; omit to list every patient at/above threshold"),
+    include_disconnected: bool = Query(False, description="also include captures flagged disconnected"),
+    ds: Dataset = Depends(get_dataset),
+):
+    """Per-patient rolling mechanical power (see backend/mechanical_power.py).
+
+    With `patient_id`: that patient's full status (returned even if below
+    threshold). Without it: every patient currently at/above threshold, in
+    the same shape /api/notifications uses for `type: mechanical_power`.
+    """
+    if patient_id:
+        patient = next((p for p in ds.patients if p["patient_id"] == patient_id), None)
+        if patient is None:
+            return denan({"error": f"unknown patient_id: {patient_id}"})
+        status = _patient_mp_raw(ds, seg, patient, mp["window_hours"], include_disconnected)
+        return denan({
+            "patient_id": patient_id,
+            "status": status,
+            "above_threshold": bool(status and status["avg_mp_j_per_min"] >= mp["threshold"]),
+            "threshold": mp["threshold"],
+            "window_hours": mp["window_hours"],
+            "formula": {"criterion": "trailing rolling-average mp_j_per_min >= threshold", **mp},
+        })
+
+    flagged = _all_patient_mp_notifications(ds, seg, mp, None, include_disconnected)
+    return denan({
+        "patients": flagged,
+        "total": len(flagged),
+        "threshold": mp["threshold"],
+        "window_hours": mp["window_hours"],
+        "formula": {"criterion": "trailing rolling-average mp_j_per_min >= threshold", **mp},
     })
 
 
@@ -350,6 +486,7 @@ def get_notifications(
     ie: dict = Depends(ie_params),
     ap: dict = Depends(auto_peep_params),
     fs: dict = Depends(flow_starvation_params),
+    mp: dict = Depends(mp_params),
     patient_id: str | None = Query(None, description="restrict the scan to one patient; omit to scan the whole dataset"),
     include_disconnected: bool = Query(False, description="also scan captures flagged disconnected (flat flow, no real breathing -> never produces events, skipped by default for speed)"),
     page: int = Query(1, ge=1),
@@ -362,10 +499,16 @@ def get_notifications(
     if not scan.complete and len(scan.results) < needed:
         advance_scan(ds, scan, seg, dt, ie, ap, fs, needed)
 
+    # Mechanical power is patient-level, not per-capture, so it isn't part of
+    # the breath-event NotificationScan above -- it's computed separately
+    # (cheaply, since each patient's own MP is cached per (patient, seg,
+    # window) in ds.mp_cache) and merged in before the final sort+slice.
+    mp_notifs = _all_patient_mp_notifications(ds, seg, mp, patient_id, include_disconnected)
+
     # results can complete out of claim-order under concurrent advancing
     # (two captures processed in parallel may finish in either order), so
     # re-sort before slicing rather than trusting append order.
-    ordered = sorted(scan.results, key=_capture_sort_key, reverse=True)
+    ordered = sorted(scan.results + mp_notifs, key=_capture_sort_key, reverse=True)
     total = len(ordered)
     start = (page - 1) * page_size
     page_items = ordered[start : start + page_size]
@@ -378,7 +521,7 @@ def get_notifications(
         "total_pages": max(1, -(-total // page_size)),
         "scanned_captures": scan.scanned,
         "scan_complete": scan.complete,
-        "formula": _formula_block(dt, ie, ap, fs),
+        "formula": _formula_block(dt, ie, ap, fs, mp),
     })
 
 
@@ -403,3 +546,7 @@ def warmup_notifications(ds: Dataset) -> None:
     )
     scan = get_or_create_scan(ds, seg, dt, ie, ap, fs, None, False)
     advance_scan(ds, scan, seg, dt, ie, ap, fs, needed=len(scan.pending))
+
+    mp = mp_params(threshold=17.0, window_hours=24.0)
+    for p in ds.patients:
+        _patient_mp_raw(ds, seg, p, mp["window_hours"], False)

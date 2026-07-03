@@ -84,7 +84,7 @@ backend/
     routers/
       waveform.py      # /api/index, /api/waveform, /api/breaths
       asynchrony.py    # /api/asynchrony, /api/auto-peep, /api/flow-starvation,
-                       # /api/notifications (see docs/asynchrony.md)
+                       # /api/mechanical-power, /api/notifications (see docs/asynchrony.md)
   parser.py            # (unchanged) metadata + CSV loading
   breath_segment.py    # (unchanged) segmentation algorithm
   breath_metrics.py    # (unchanged) derived per-breath metrics
@@ -92,6 +92,7 @@ backend/
   ineffective_effort.py # ineffective-effort detection formula
   auto_peep.py          # auto-PEEP (air trapping) detection formula (see auto-peep.md)
   flow_starvation.py    # flow-starvation detection formula
+  mechanical_power.py   # per-patient rolling mechanical power (P-V loop integration)
   requirements.txt
 frontend/
   src/

@@ -177,3 +177,26 @@ export function fsParamsFromSearchParams(sp) {
     flowRangeMax: Number(sp.get("flow_range_max") ?? DEFAULT_FS_PARAMS.flowRangeMax),
   };
 }
+
+// Defaults for mechanical power (per-patient rolling average, not a
+// per-breath detector) — see backend/mechanical_power.py. Mortality risk
+// rises above roughly 17-19 J/min per Serpa Neto et al. 2018.
+export const DEFAULT_MP_PARAMS = {
+  mpThreshold: 17.0,
+  mpWindowHours: 24.0,
+};
+
+export function mpQuery(params) {
+  return {
+    threshold: params.mpThreshold,
+    window_hours: params.mpWindowHours,
+  };
+}
+
+export function mpParamsFromSearchParams(sp) {
+  if (!sp.has("threshold")) return null;
+  return {
+    mpThreshold: Number(sp.get("threshold") ?? DEFAULT_MP_PARAMS.mpThreshold),
+    mpWindowHours: Number(sp.get("window_hours") ?? DEFAULT_MP_PARAMS.mpWindowHours),
+  };
+}

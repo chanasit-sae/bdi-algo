@@ -8,17 +8,19 @@ const TYPE_LABEL = {
   ineffective_effort: "Ineffective effort",
   auto_peep: "Auto-PEEP",
   flow_starvation: "Flow starvation",
+  mechanical_power: "Mechanical power",
 };
 
 // Build the Viewer deep-link for one notification: selects the same
 // patient/capture, reproduces the exact segmentation AND every detector's
 // formula params that produced it, so the Viewer's own asynchrony scan is
-// guaranteed to find this same event and highlight it.
+// guaranteed to find this same event and highlight it. Mechanical power is
+// patient-level, not a single breath, so `breath` is only added when the
+// notification actually has one (every type except mechanical_power).
 function viewerLink(n, formula) {
-  const { double_trigger: dt, ineffective_effort: ie, auto_peep: ap, flow_starvation: fs } = formula;
+  const { double_trigger: dt, ineffective_effort: ie, auto_peep: ap, flow_starvation: fs, mechanical_power: mp } = formula;
   const sp = new URLSearchParams({
     file: n.raw_data,
-    breath: String(n.breath_idx_a),
     ...n.segmentation,
     ratio: String(dt.ratio),
     ti_ref: dt.ti_ref,
@@ -37,7 +39,10 @@ function viewerLink(n, formula) {
     lookback_sec: String(fs.lookback_sec),
     require_constant_flow: String(fs.require_constant_flow),
     flow_range_max: String(fs.flow_range_max),
+    threshold: String(mp.threshold),
+    window_hours: String(mp.window_hours),
   });
+  if (n.breath_idx_a != null) sp.set("breath", String(n.breath_idx_a));
   return `/?${sp.toString()}`;
 }
 
@@ -56,8 +61,10 @@ export default function NotificationList({ notifications, formula }) {
               day {n.day} · {n.time}
             </span>
             <span className="notif-detail">
-              breath {n.breath_idx_a}
-              {n.breath_idx_b != null && ` → ${n.breath_idx_b}`} · {n.detail}
+              {n.breath_idx_a != null && `breath ${n.breath_idx_a}`}
+              {n.breath_idx_b != null && ` → ${n.breath_idx_b}`}
+              {n.breath_idx_a != null && " · "}
+              {n.detail}
             </span>
           </Link>
         </li>

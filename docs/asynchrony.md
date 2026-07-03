@@ -2,21 +2,26 @@
 
 **Modules:** `backend/asynchrony.py` (double-triggering), `backend/ineffective_effort.py`
 (ineffective effort), `backend/auto_peep.py` (auto-PEEP — full spec in
-[auto-peep.md](../auto-peep.md)), `backend/flow_starvation.py` (flow starvation) ·
+[auto-peep.md](../auto-peep.md)), `backend/flow_starvation.py` (flow starvation),
+`backend/mechanical_power.py` (mechanical power — per-patient, not a breath-level detector) ·
 **Deps:** numpy + pandas (reuse `breath_segment.py` output)
 **API:** `backend/server/routers/asynchrony.py` — `GET /api/asynchrony` (one capture,
-every detector), `GET /api/auto-peep` and `GET /api/flow-starvation` (one capture, single
-detector each), and `GET /api/notifications` (scans the dataset, paginated)
+every breath-level detector), `GET /api/auto-peep` and `GET /api/flow-starvation` (one
+capture, single detector each), `GET /api/mechanical-power` (per-patient), and
+`GET /api/notifications` (scans the dataset, paginated, includes mechanical power)
 **Pages:**
 - **Notifications** (`frontend/src/pages/NotificationsPage.jsx`) — a plain, most-recent-first
   list of every flagged event across the whole dataset, 10 per page, using fixed default
   detection settings. No tunable controls here on purpose — click a notification to
   inspect and tune it in the Viewer.
 - **Viewer** (`frontend/src/pages/ViewerPage.jsx`) — independently detects and highlights
-  **every** flagged event (all four types) for whatever capture is currently loaded, with
-  its own Baseline/DT-formula/IE-formula/AP-formula/FS-formula controls. Clicking a
-  notification deep-links here with the exact segmentation *and* every formula reproduced,
-  so the same event is guaranteed to be found again and marked active (brighter band).
+  **every** flagged breath-level event (all four detectors) for whatever capture is
+  currently loaded, with its own Baseline/DT-formula/IE-formula/AP-formula/FS-formula
+  controls. Clicking a notification deep-links here with the exact segmentation *and*
+  every formula reproduced, so the same event is guaranteed to be found again and marked
+  active (brighter band). Mechanical power has no per-breath band to highlight (it's a
+  patient-level rolling average, see §5) — clicking its notification lands on the
+  patient's most recent capture instead.
 
 Every event, regardless of which detector produced it, carries a `type` plus two
 generalized fields computed by the router: **`t0`/`t1`** (the span to highlight on a
@@ -200,6 +205,59 @@ stuck or exploding.
 
 ---
 
+## 5. Mechanical power
+
+Unlike the four detectors above, this isn't a per-breath event — it's a **per-patient
+rolling-average exposure metric**. A single unusually energetic breath doesn't mean much
+on its own; a *sustained* elevated delivery of energy to the lung is the actual
+ventilator-induced lung injury (VILI) risk. Popularized as a unifying VILI-risk framework
+by **Gattinoni L, Tonetti T, Cressoni M, et al. "Ventilator-related causes of lung injury:
+the mechanical power." *Intensive Care Med.* 2016;42(10):1567–1575**. A large ICU
+meta-analysis — **Serpa Neto A, Deliberato RO, Johnson AEW, et al. "Mechanical power of
+ventilation is associated with mortality in critically ill patients: an individual patient
+data meta-analysis." *Crit Care Med.* 2018;46(2):200–207** — found mortality risk rising
+above roughly **17–19 J/min**, the range this module's default threshold (**17.0 J/min**)
+sits at.
+
+### Formula — direct pressure-volume loop integration
+```
+energy_joules(breath) = 0.0980665 × ∫ pressure d(volume_in_liters)     [inspiratory limb only]
+mp_j_per_min(breath)  = energy_joules(breath) × rr_bpm
+avg_mp_j_per_min(patient) = mean(mp_j_per_min over every breath in the trailing window)
+```
+`0.0980665` J per (cmH₂O·L) is the standard conversion (1 cmH₂O = 98.0665 Pa; 1 Pa·m³ = 1 J;
+1 L = 10⁻³ m³). The integral is taken over each breath's own `insp_start_idx → insp_end_idx`
+(the area of that breath's P-V loop) — this works for **any** breath shape or ventilator
+mode and needs no detected end-inspiratory plateau, unlike Gattinoni's algebraic
+"simplified equation" (`0.098 × RR × VT(L) × (PIP − 0.5×driving_pressure)`), which needs a
+plateau that isn't present on every breath. The direct integral isn't an approximation of
+the simplified equation — it's the more general form the simplified equation is itself
+derived from, for the specific case of constant-flow volume control with a plateau (see
+`mechanical_power.py`'s `--compare` CLI flag for a cross-check between the two on breaths
+where a plateau is available; they agree closely there, as expected).
+
+**Only complete breaths are used** (`is_complete=True`) — the trailing partial breath's
+`rr_bpm` is computed the same as any other breath's (never `None`/`NaN`) but is a
+known-unreliable artifact of where the recording happened to cut off, and multiplying real
+per-breath energy by that bogus rate produces wildly inflated MP values. (This was a real
+bug during development: an uncorrected run flagged two patients at 62.02 and 18.39 J/min;
+filtering to complete breaths corrected them to 49.51 — still flagged — and 12.15 — correctly
+not flagged.)
+
+### Rolling window
+`avg_mp_j_per_min` is the mean over every complete breath from every one of a patient's
+captures whose timestamp falls within `window_hours` (default **24h**) of their single most
+recent capture. Captures don't carry an absolute calendar date, so `day`/`capture_time` are
+combined into a synthetic per-patient timeline (`day×24 + time-of-day`) purely for ordering
+and windowing within that one patient — never compared across patients.
+
+### On the sample dataset
+Of 3 patients, **1** (`2a7b9f18...`) is flagged: avg **49.51 J/min** over 7 complete breaths
+across its most recent 2 captures within the 24h window. The other 2 patients sit well
+below threshold (e.g. `bd496321...` at 12.15 J/min).
+
+---
+
 ## On the sample dataset (double-triggering)
 Under the app's recommended segmentation (`baseline="slope"`) and the clinical default
 `ratio=0.5`, double-triggering produces **zero** flagged pairs on this sample — the ~68
@@ -262,6 +320,28 @@ detector each — `/api/auto-peep` mirrors [auto-peep.md](../auto-peep.md)'s own
 exactly; `/api/flow-starvation` is the equivalent for flow starvation. Both are for callers
 that only want one detector without running the other three.
 
+### `GET /api/mechanical-power` — per-patient, not per-capture
+```
+GET /api/mechanical-power?<segmentation params>&threshold=17.0&window_hours=24.0
+    &patient_id=<optional>&include_disconnected=false
+```
+With `patient_id`: that one patient's status (returned even if below threshold):
+```json
+{ "patient_id": "2a7b9f18...", "above_threshold": true, "threshold": 17.0, "window_hours": 24.0,
+  "status": { "avg_mp_j_per_min": 49.51, "n_breaths": 7, "n_captures_total": 2,
+              "latest_day": 14, "latest_time": "11:18:25", "latest_raw_data": "....csv" },
+  "formula": { "criterion": "trailing rolling-average mp_j_per_min >= threshold", ... } }
+```
+Without it: every patient currently at/above threshold, in the same shape
+`/api/notifications` uses for `type: "mechanical_power"`. Each patient's raw rolling-average
+computation is cached in `ds.mp_cache` keyed by `(patient_id, segmentation, window_hours,
+include_disconnected)` — **not** by threshold, so checking the same patient against a
+different threshold (or via `/api/notifications`, which uses its own threshold) reuses the
+same cached number rather than re-integrating every P-V loop again. Computing it walks that
+patient's own captures most-recent-first and stops as soon as one falls more than
+`window_hours` before the latest — the same early-exit bounding idea as `NotificationScan`,
+just scoped to one patient's window instead of the whole dataset.
+
 ### `GET /api/notifications` — incremental scan + paginate
 ```
 GET /api/notifications?<same params as above>
@@ -282,11 +362,19 @@ later page request or the background warmup below. Concurrent callers (e.g. a li
 racing the warmup) claim different captures under a lock but do the actual
 load-and-detect work outside it, so they don't block each other for long.
 
+Mechanical power isn't part of that scan (it's patient-level, not per-capture — a single
+capture is never "done" for MP until the whole patient's rolling window has been walked).
+Instead, `get_notifications()` separately computes `_all_patient_mp_notifications()` for
+every matching patient (each one cheap and cached — see the `/api/mechanical-power` section
+above) and merges the result into the same list before the final sort + page slice, so it
+appears inline with everything else, most-recent-first.
+
 A background task started in `main.py`'s lifespan (`asyncio.to_thread`, so it doesn't
 block the app from accepting requests) advances the *default* param combination — the only
 one the Notifications page ever asks for, since it has no tunable controls — all the way to
-completion. In practice this means the first real visitor rarely waits on a cold scan at
-all, and every request after the scan completes is an instant slice of an already-built list.
+completion, and warms every patient's MP cache alongside it. In practice this means the
+first real visitor rarely waits on a cold scan at all, and every request after that is an
+instant slice of an already-built list.
 
 Response adds a `scanned_captures` count and a `scan_complete` flag (false if the scan
 hasn't reached the end of its pending queue yet — `total`/`total_pages` are accurate as far
@@ -317,6 +405,7 @@ The Notifications page builds, per card:
     &flow_prominence=&flow_prominence_max=&pressure_prominence=&concurrent_tol_sec=&bump_lookback_sec=
     &flow_frac=&flow_abs=&peep_min=&require_pressure=
     &dip_prominence=&lookback_sec=&require_constant_flow=&flow_range_max=
+    &threshold=&window_hours=
 ```
 The Viewer reads this once on mount: selects the owning patient/capture, applies the same
 segmentation and **every** formula, and selects `breath_idx_a` in the breath dropdown. It
@@ -327,6 +416,15 @@ the exact formula params the notification was generated with guarantees that eve
 reappears in the Viewer's fresh scan — deriving the highlight from a live per-capture
 fetch (rather than storing raw `t0`/`t1` seconds from the notification itself) means
 switching capture/patient can never leave a stale band on the wrong waveform.
+
+A `type: "mechanical_power"` notification's link omits `breath` entirely (there's no single
+breath to select) — `n.breath_idx_a` is absent on that notification type, and
+`NotificationList.jsx`'s `viewerLink()` only sets the `breath` param when it's present. It
+still lands on `raw_data` = the patient's most recent capture (`status.latest_raw_data`),
+just with no breath pre-selected and nothing highlighted, since mechanical power isn't part
+of `/api/asynchrony`'s `events` (see §5 — it's patient-level). `threshold`/`window_hours`
+still round-trip through the link for consistency even though the Viewer doesn't currently
+act on them.
 
 ## CLI
 ```bash
@@ -344,4 +442,9 @@ python3 backend/flow_starvation.py [data_dir] [--baseline slope] [--hysteresis N
     [--dip-prominence 2.0] [--lookback-sec 0.4] [--require-constant-flow] [--flow-range-max 20.0]
 # --calibrate prints the dataset's real notch-prominence percentiles instead of detecting,
 # useful for re-checking the threshold if the dataset changes
+
+python3 backend/mechanical_power.py [data_dir] [--baseline slope] [--hysteresis N] \
+    [--threshold 17.0] [--window-hours 24.0]
+# --compare cross-checks the direct P-V integral against Gattinoni's simplified equation
+# on breaths where a plateau was detected, instead of running the per-patient threshold scan
 ```

@@ -6,6 +6,7 @@ const TYPE_LABEL = {
   ineffective_effort: "Ineffective effort",
   auto_peep: "Auto-PEEP",
   flow_starvation: "Flow starvation",
+  mechanical_power: "Mechanical power",
 };
 
 // List of flagged asynchrony events for the currently loaded capture. Clicking
