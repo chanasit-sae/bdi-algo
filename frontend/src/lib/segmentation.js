@@ -58,3 +58,36 @@ export function paramsFromSearchParams(sp) {
     showDisc: true,
   };
 }
+
+// Defaults for the double-triggering formula itself (separate from breath
+// segmentation) — shared by every page that runs the detector
+// (NotificationsPage, ViewerPage).
+export const DEFAULT_ASYNCHRONY_PARAMS = {
+  ratio: 0.5,
+  tiRef: "pair",
+  requireStacking: false,
+  stackRatio: 1.5,
+};
+
+export function asynchronyQuery(params) {
+  return {
+    ratio: params.ratio,
+    ti_ref: params.tiRef,
+    require_stacking: params.requireStacking,
+    stack_ratio: params.stackRatio,
+  };
+}
+
+// The inverse of asynchronyQuery — mirrors paramsFromSearchParams above, so a
+// Viewer deep link can reproduce the exact ratio/ti_ref that flagged an event
+// (otherwise the event might not reappear in the Viewer's own fresh scan).
+// Returns null if the URL carries no formula info.
+export function asynchronyParamsFromSearchParams(sp) {
+  if (!sp.has("ratio")) return null;
+  return {
+    ratio: Number(sp.get("ratio")) || DEFAULT_ASYNCHRONY_PARAMS.ratio,
+    tiRef: sp.get("ti_ref") || DEFAULT_ASYNCHRONY_PARAMS.tiRef,
+    requireStacking: sp.get("require_stacking") === "true",
+    stackRatio: Number(sp.get("stack_ratio") ?? DEFAULT_ASYNCHRONY_PARAMS.stackRatio),
+  };
+}

@@ -5,21 +5,23 @@ import { Link } from "react-router-dom";
 const TYPE_LABEL = { double_trigger: "Double triggering" };
 
 // Build the Viewer deep-link for one notification: selects the same
-// patient/capture, reproduces the exact segmentation that flagged it (so the
-// breath boundaries match), pre-selects the first breath of the pair, and
-// marks the flagged span so the chart highlights it on arrival.
-function viewerLink(n) {
+// patient/capture, reproduces the exact segmentation AND formula that flagged
+// it (baseline/hysteresis/... plus ratio/ti_ref/stacking), so the Viewer's own
+// asynchrony scan is guaranteed to find this same event and highlight it.
+function viewerLink(n, formula) {
   const sp = new URLSearchParams({
     file: n.raw_data,
     breath: String(n.breath_idx_a),
     ...n.segmentation,
-    hl0: String(n.t_insp_start_a),
-    hl1: String(n.t_exp_end_b),
+    ratio: String(formula.ratio),
+    ti_ref: formula.ti_ref,
+    require_stacking: String(formula.require_stacking),
+    stack_ratio: String(formula.stack_ratio),
   });
   return `/?${sp.toString()}`;
 }
 
-export default function NotificationList({ notifications }) {
+export default function NotificationList({ notifications, formula }) {
   if (!notifications.length) {
     return <p className="muted">No asynchrony notifications with the current settings.</p>;
   }
@@ -27,7 +29,7 @@ export default function NotificationList({ notifications }) {
     <ul className="notif-list">
       {notifications.map((n, i) => (
         <li key={i}>
-          <Link to={viewerLink(n)} className="notif-card">
+          <Link to={viewerLink(n, formula)} className="notif-card">
             <span className="notif-type">{TYPE_LABEL[n.type] || n.type}</span>
             <span className="notif-patient">{n.patient_id.slice(0, 8)}…</span>
             <span className="notif-capture">

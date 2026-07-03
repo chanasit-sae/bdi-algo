@@ -3,9 +3,15 @@
 **Module:** `backend/asynchrony.py` · **Deps:** pandas (reuses `breath_segment.py` output)
 **API:** `GET /api/double-triggers` (single capture) and `GET /api/notifications` (scans the
 dataset) — both in `backend/server/routers/asynchrony.py`
-**Page:** Notifications (`frontend/src/pages/NotificationsPage.jsx`) — lists every flagged
-event across the dataset; clicking one deep-links to the Viewer with the same
-segmentation reproduced and the flagged breaths highlighted.
+**Pages:**
+- Notifications (`frontend/src/pages/NotificationsPage.jsx`) — lists every flagged
+  event across the whole dataset.
+- Viewer (`frontend/src/pages/ViewerPage.jsx`) — independently detects and highlights
+  **every** flagged event for whatever capture is currently loaded (its own
+  Ratio/Ti-ref/stacking controls, same as Notifications), listed in the aside and
+  shaded on every chart. Clicking a notification deep-links here with the same
+  segmentation *and* formula reproduced, so the same event is guaranteed to be
+  found again and marked active (brighter band).
 
 ## What it detects
 **Double triggering**: the patient's neural inspiratory effort continues past
@@ -121,14 +127,21 @@ identical breath boundaries elsewhere:
 The Notifications page (`frontend/src/pages/NotificationsPage.jsx`) renders
 this list; clicking a notification builds a Viewer deep link:
 ```
-/?file=<raw_data>&breath=<breath_idx_a>&<...segmentation>&hl0=<t_insp_start_a>&hl1=<t_exp_end_b>
+/?file=<raw_data>&breath=<breath_idx_a>&<...segmentation>&ratio=&ti_ref=&require_stacking=&stack_ratio=
 ```
 The Viewer (`ViewerPage.jsx`) reads this once on mount: selects the owning
-patient/capture, applies the same segmentation (so the breath list matches
-exactly), selects `breath_idx_a` in the breath dropdown, and shades
-`[hl0, hl1]` on every chart as a highlight band — the same visual the
-Notifications/Double-trigger detail view uses — so the flagged pair is visible
-regardless of which single breath happens to be selected.
+patient/capture, applies the same segmentation *and* formula params, and
+selects `breath_idx_a` in the breath dropdown. It then runs its **own**
+`/api/double-triggers` fetch for that capture (independent of the deep link —
+this happens on every capture the Viewer ever loads, not just deep-linked
+ones) and highlights **every** flagged pair it finds, marking whichever one
+matches the `breath` param as active (brighter band). Passing the exact same
+`ratio`/`ti_ref`/`require_stacking`/`stack_ratio` the notification was
+generated with guarantees that event reappears in the Viewer's fresh scan —
+an earlier version passed raw `t0`/`t1` seconds instead, which went stale (wrong
+region highlighted, or none) the moment the user switched to a different
+capture; deriving the highlight from a live per-capture fetch instead of
+stored seconds removes that failure mode structurally.
 
 ## CLI
 ```bash

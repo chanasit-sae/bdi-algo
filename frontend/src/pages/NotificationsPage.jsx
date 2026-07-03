@@ -1,17 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api.js";
-import { DEFAULT_SEGMENTATION_PARAMS, segmentationQuery } from "../lib/segmentation.js";
+import {
+  DEFAULT_SEGMENTATION_PARAMS,
+  segmentationQuery,
+  DEFAULT_ASYNCHRONY_PARAMS,
+  asynchronyQuery,
+} from "../lib/segmentation.js";
 import ControlsBar from "../components/ControlsBar.jsx";
 import DoubleTriggerControls from "../components/DoubleTriggerControls.jsx";
 import NotificationList from "../components/NotificationList.jsx";
 
-const DEFAULT_PARAMS = {
-  ...DEFAULT_SEGMENTATION_PARAMS,
-  ratio: 0.5,
-  tiRef: "pair",
-  requireStacking: false,
-  stackRatio: 1.5,
-};
+const DEFAULT_PARAMS = { ...DEFAULT_SEGMENTATION_PARAMS, ...DEFAULT_ASYNCHRONY_PARAMS };
 
 // Notification center: scans the dataset for asynchrony and lists what it
 // finds. Only double-triggering exists today; other asynchrony types can be
@@ -22,6 +21,7 @@ export default function NotificationsPage() {
   const [patientFilter, setPatientFilter] = useState("");
   const [params, setParams] = useState(DEFAULT_PARAMS);
   const [notifications, setNotifications] = useState([]);
+  const [formula, setFormula] = useState(DEFAULT_ASYNCHRONY_PARAMS);
   const [status, setStatus] = useState("");
 
   const set = (k, v) => setParams((p) => ({ ...p, [k]: v }));
@@ -37,10 +37,7 @@ export default function NotificationsPage() {
   const opts = useMemo(
     () => ({
       ...segOpts,
-      ratio: params.ratio,
-      ti_ref: params.tiRef,
-      require_stacking: params.requireStacking,
-      stack_ratio: params.stackRatio,
+      ...asynchronyQuery(params),
       include_disconnected: params.showDisc,
       ...(patientFilter ? { patient_id: patientFilter } : {}),
     }),
@@ -55,6 +52,7 @@ export default function NotificationsPage() {
       .then((d) => {
         if (cancelled) return;
         setNotifications(d.notifications);
+        setFormula(d.formula);
         setStatus(`${d.notifications.length} notification(s) across ${d.scanned_captures} captures scanned`);
       })
       .catch((e) => !cancelled && setStatus("error: " + e.message));
@@ -93,7 +91,7 @@ export default function NotificationsPage() {
           <code>docs/asynchrony.md</code> for the formula). More asynchrony types can be added
           here later. Click a notification to inspect the flagged breaths in the Viewer.
         </p>
-        <NotificationList notifications={notifications} />
+        <NotificationList notifications={notifications} formula={formula} />
       </div>
     </>
   );

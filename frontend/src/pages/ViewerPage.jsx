@@ -3,39 +3,42 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "../lib/api.js";
 import { COLORS } from "../lib/charts.js";
 import { usePatientCapture } from "../lib/usePatientCapture.js";
-import { DEFAULT_SEGMENTATION_PARAMS, segmentationQuery, paramsFromSearchParams } from "../lib/segmentation.js";
+import {
+  DEFAULT_SEGMENTATION_PARAMS,
+  segmentationQuery,
+  paramsFromSearchParams,
+  DEFAULT_ASYNCHRONY_PARAMS,
+  asynchronyQuery,
+  asynchronyParamsFromSearchParams,
+} from "../lib/segmentation.js";
 import CaptureSelect from "../components/CaptureSelect.jsx";
 import ControlsBar from "../components/ControlsBar.jsx";
+import DoubleTriggerControls from "../components/DoubleTriggerControls.jsx";
 import WaveformChart from "../components/WaveformChart.jsx";
 import MetadataPanel from "../components/MetadataPanel.jsx";
 import BreathPanel from "../components/BreathPanel.jsx";
+import AsynchronyPanel from "../components/AsynchronyPanel.jsx";
+
+const DEFAULT_PARAMS = { ...DEFAULT_SEGMENTATION_PARAMS, ...DEFAULT_ASYNCHRONY_PARAMS };
 
 export default function ViewerPage() {
   const [searchParams] = useSearchParams();
   const [patients, setPatients] = useState(null);
-  const [params, setParams] = useState(() => paramsFromSearchParams(searchParams) || DEFAULT_SEGMENTATION_PARAMS);
+  const [params, setParams] = useState(() => ({
+    ...(paramsFromSearchParams(searchParams) || DEFAULT_SEGMENTATION_PARAMS),
+    ...(asynchronyParamsFromSearchParams(searchParams) || DEFAULT_ASYNCHRONY_PARAMS),
+  }));
   const [breathIdx, setBreathIdx] = useState(-1);
   const [wf, setWf] = useState(null);
   const [breaths, setBreaths] = useState([]);
   const [baselineVal, setBaselineVal] = useState(null);
+  const [asyncEvents, setAsyncEvents] = useState([]);
+  const [activeEventIdx, setActiveEventIdx] = useState(-1);
   const [status, setStatus] = useState("");
 
-  // A deep link from the Notifications page (?file=&breath=&hl0=&hl1=&...) —
-  // applied once below, then left alone so normal interaction isn't fought.
-  // The span is in seconds *of that specific capture*, so it must only be
-  // shown while that same capture is still loaded — otherwise switching
-  // patient/capture would leave a stale red band drawn over an unrelated
-  // waveform at whatever seconds happened to match.
-  const [urlHighlight] = useState(() => {
-    const t0 = searchParams.get("hl0");
-    const t1 = searchParams.get("hl1");
-    const hlFile = searchParams.get("file");
-    return t0 != null && t1 != null && hlFile
-      ? { t0: Number(t0), t1: Number(t1), file: hlFile }
-      : null;
-  });
   const appliedUrlCapture = useRef(false);
   const appliedUrlBreath = useRef(false);
+  const appliedUrlEvent = useRef(false);
 
   const set = (k, v) => setParams((p) => ({ ...p, [k]: v }));
 
@@ -115,18 +118,67 @@ export default function ViewerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [breaths]);
 
+  // --- fetch every asynchrony event for this capture (all of it, not just one) ---
+  const asyncOpts = useMemo(() => asynchronyQuery(params), [params]);
+
+  useEffect(() => {
+    if (!file) {
+      setAsyncEvents([]);
+      setActiveEventIdx(-1);
+      return;
+    }
+    let cancelled = false;
+    api
+      .doubleTriggers(file, { ...breathsOpts, ...asyncOpts })
+      .then((d) => {
+        if (cancelled) return;
+        setAsyncEvents(d.events);
+        setActiveEventIdx(-1);
+      })
+      .catch((e) => !cancelled && setStatus("error: " + e.message));
+    return () => {
+      cancelled = true;
+    };
+  }, [file, breathsOpts, asyncOpts]);
+
+  // deep link: once this capture's events are in, mark the flagged one active
+  useEffect(() => {
+    if (appliedUrlEvent.current) return;
+    const targetBreath = searchParams.get("breath");
+    if (targetBreath == null || !asyncEvents.length) return;
+    const idx = asyncEvents.findIndex((e) => String(e.breath_idx_a) === targetBreath);
+    if (idx >= 0) setActiveEventIdx(idx);
+    appliedUrlEvent.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asyncEvents]);
+
   // status line once the waveform is in
   useEffect(() => {
     if (!wf) return;
     const n = wf.t_sec.length;
     const dur = wf.t_sec[n - 1] || 0;
-    setStatus(`${n} samples · ${dur.toFixed(1)}s @ 25Hz · ${breaths.length} breaths`);
-  }, [wf, breaths]);
+    setStatus(
+      `${n} samples · ${dur.toFixed(1)}s @ 25Hz · ${breaths.length} breaths · ${asyncEvents.length} asynchrony flagged`
+    );
+  }, [wf, breaths, asyncEvents]);
 
-  // only draw the deep-link highlight while its own capture is still loaded
+  // clicking an asynchrony event makes its band active AND selects its breath
+  function selectEvent(i) {
+    setActiveEventIdx(i);
+    const ev = asyncEvents[i];
+    if (!ev) return;
+    const idx = breaths.findIndex((b) => b.breath_idx === ev.breath_idx_a);
+    if (idx >= 0) setBreathIdx(idx);
+  }
+
   const highlights = useMemo(
-    () => (urlHighlight && urlHighlight.file === file ? [{ ...urlHighlight, active: true }] : []),
-    [urlHighlight, file]
+    () =>
+      asyncEvents.map((e, i) => ({
+        t0: e.t_insp_start_a,
+        t1: e.t_exp_end_b,
+        active: i === activeEventIdx,
+      })),
+    [asyncEvents, activeEventIdx]
   );
 
   const sel = breathIdx >= 0 ? breaths[breathIdx] : null;
@@ -166,6 +218,7 @@ export default function ViewerPage() {
       </div>
 
       <ControlsBar params={params} set={set} />
+      <DoubleTriggerControls params={params} set={set} />
 
       <main className="viewer">
         <div className="charts">
@@ -211,6 +264,8 @@ export default function ViewerPage() {
         <aside>
           <h2>Metadata</h2>
           <MetadataPanel patient={patient} capture={capture} />
+          <h2 style={{ marginTop: 16 }}>Asynchrony</h2>
+          <AsynchronyPanel events={asyncEvents} activeIdx={activeEventIdx} onSelect={selectEvent} />
           <h2 style={{ marginTop: 16 }}>Breath</h2>
           <BreathPanel breath={sel} />
         </aside>
