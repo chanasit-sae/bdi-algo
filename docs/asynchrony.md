@@ -216,27 +216,24 @@ GET /api/notifications?<same params as above>
                                   # events, so they're skipped by default for speed
     &page=1&page_size=10
 ```
-Backed by a `NotificationScan` (`backend/server/dataset.py`), one per distinct combination
-of every param that affects the result. On first use for a given param set, captures are
-sorted most-recent-first **once** (metadata only, no waveform loading — cheap regardless of
-dataset size) into a pending queue. From there the scan is **lazy and incremental**: a
-request only claims and processes pending captures, one at a time, until it has found at
-least `page * page_size` events, then stops — it never scans the whole dataset just to
-answer page 1. Each event found is appended straight to the scan's shared `results` list the
-moment it's found, so a capture is never re-processed for the same params, whether by a
-later page request or the background warmup below. Concurrent callers (e.g. a live request
-racing the warmup) claim different captures under a lock but do the actual
-load-and-detect work outside it, so they don't block each other for long.
+Loops every capture (or one patient's), runs `_scan_capture()` (all three detectors) on
+each, and returns one page of the flattened, most-recent-first list (sorted by capture `day`
+desc, then `time` desc — captures don't carry an absolute date, so cross-patient ordering
+is approximate). Each notification adds `patient_id`/`raw_data`/`day`/`time` plus the
+`segmentation` params used:
 
-A background task started in `main.py`'s lifespan (`asyncio.to_thread`, so it doesn't
-block the app from accepting requests) advances the *default* param combination — the only
-one the Notifications page ever asks for, since it has no tunable controls — all the way to
-completion. In practice this means the first real visitor rarely waits on a cold scan at
-all, and every request after the scan completes is an instant slice of an already-built list.
-
-Response adds a `scanned_captures` count and a `scan_complete` flag (false if the scan
-hasn't reached the end of its pending queue yet — `total`/`total_pages` are accurate as far
-as scanned so far, but may still grow):
+**Caching.** The full (unpaginated) scan is the expensive part — re-running it on every
+page flip or repeat visit for a page that has no tunable controls (so always asks for the
+same params) is pure waste. `Dataset.notification_cache` (`backend/server/dataset.py`)
+caches the scan result keyed by every param that affects it (segmentation + all three
+formulas + `patient_id` + `include_disconnected`); `page`/`page_size` only slice the cached
+list, they never trigger a re-scan. `warmup_notifications()` additionally pre-runs the
+Notifications page's exact default param set as a **background task at server startup**
+(`main.py`'s lifespan, via `asyncio.to_thread` so it doesn't block the app from accepting
+requests) — the first visitor should generally never wait on a cold scan. Measured on the
+local sample: a cache hit is ~35x faster than the scan it replaces (374ms -> 10ms); the
+gap is expected to be larger on the VM's full dataset, where the underlying scan itself
+takes longer.
 ```json
 {
   "notifications": [ { "type": "ineffective_effort", "patient_id": "...", "raw_data": "....csv",
