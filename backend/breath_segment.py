@@ -124,10 +124,11 @@ def _detect_slope_onsets(
     slightly negative is not mistaken for expiration.
 
     peak_min (L/min, 0 = off) requires the rise the onset starts to reach a real
-    peak inspiratory flow: the first flow peak after the candidate (see
-    `_first_peak_flow`, searched up to `peak_cap` samples ahead, default =
-    refractory) must be at least `peak_min`, else the point is too weak to be a
-    breath and is skipped. ~60-90 L/min is typical for a normal adult.
+    peak inspiratory flow *soon* after onset: the first flow peak after the
+    candidate (see `_first_peak_flow`) must be at least `peak_min` AND be reached
+    within `peak_cap` samples of the onset (the maximum onset-to-peak interval,
+    default = refractory // 2), else the rise is too weak or too slow to be a
+    breath and the point is skipped. ~60-90 L/min is typical for a normal adult.
 
     window / refractory / peak_cap are in samples; delta_threshold / exp_guard are
     L/min per second; peak_min is L/min.
@@ -136,7 +137,7 @@ def _detect_slope_onsets(
     if refractory is None:
         refractory = window
     if peak_cap is None:
-        peak_cap = max(1, refractory)
+        peak_cap = max(1, refractory // 2)
     onsets: list[int] = []
     last = -(10 ** 9)
     for i in range(window, len(flow)):

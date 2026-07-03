@@ -21,6 +21,7 @@ import numpy as np
 
 from parser import load_dataset, metadata_frame, load_waveform, SAMPLE_RATE_HZ
 from breath_segment import segment_capture, estimate_baseline
+from breath_metrics import add_metrics
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DATA = ROOT / "smart_icu_data"
@@ -321,12 +322,26 @@ function renderBreathMeta(b){
     ['<span class="swatch" style="background:'+COLORS.flow+'"></span>Inspiration', f(b.ti_sec,2)+' s'],
     ['<span class="swatch" style="background:'+COLORS.press+'"></span>Expiration', f(b.te_sec,2)+' s'],
     ['I:E', b.ie_ratio==null? '—' : '1 : '+f(1/b.ie_ratio,2)],
-    ['Tidal vol', f(b.tidal_volume_ml,1)+' mL'],
-    ['Peak flow', f(b.peak_flow,1)+' L/min'],
-    ['Peak press', f(b.peak_pressure,1)+' cmH₂O'],
-    ['Mean press', f(b.mean_pressure,1)],
-    ['PEEP', f(b.peep,1)],
+    ['Cycle time', f(b.cycle_time_sec,2)+' s'],
+    ['Duty (Ti/Ttot)', f(b.duty_cycle,2)],
     ['Rate', f(b.rr_bpm,1)+' /min'],
+    ['Tidal vol', f(b.tidal_volume_ml,1)+' mL'],
+    ['Vt insp / exp', f(b.vti_ml,0)+' / '+f(b.vte_ml,0)+' mL'],
+    ['Leak', f(b.leak_ml,0)+' mL'],
+    ['Peak flow insp', f(b.peak_insp_flow,1)+' L/min'],
+    ['Peak flow exp', f(b.peak_exp_flow,1)+' L/min'],
+    ['Mean insp flow', f(b.mean_insp_flow,1)+' L/min'],
+    ['Time to peak', f(b.time_to_peak_flow_sec,2)+' s'],
+    ['End-exp flow', f(b.end_exp_flow,1)+' L/min'],
+    ['Flow shape', f(b.flow_shape_ratio,2)],
+    ['PIP', f(b.pip_cmh2o,1)+' cmH₂O'],
+    ['Plateau', f(b.plateau_pressure_cmh2o,1)+' cmH₂O'],
+    ['Mean press', f(b.mean_pressure,1)+' cmH₂O'],
+    ['PEEP', f(b.peep,1)+' cmH₂O'],
+    ['Driving press', f(b.driving_pressure_cmh2o,1)+' cmH₂O'],
+    ['Compliance (stat)', f(b.static_compliance_ml_cmh2o,1)+' mL/cmH₂O'],
+    ['Compliance (dyn)', f(b.dynamic_compliance_ml_cmh2o,1)+' mL/cmH₂O'],
+    ['Resistance', f(b.resistance_cmh2o_l_s,1)+' cmH₂O/(L/s)'],
   ];
   el.innerHTML = rows.map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('');
 }
@@ -480,6 +495,7 @@ class Handler(BaseHTTPRequestHandler):
                                       slope_window_sec=swin, slope_delta=sdelta,
                                       slope_refractory_sec=srefr, slope_exp_guard=sguard,
                                       slope_peak_min=speak)
+            breaths = add_metrics(breaths, wf)
             self._json({"breaths": breaths.to_dict(orient="records"), "baseline": base_val})
         else:
             self._json({"error": "not found"}, 404)
