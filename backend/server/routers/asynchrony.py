@@ -285,52 +285,6 @@ def advance_scan(ds: Dataset, scan: NotificationScan, seg: dict, dt: dict, ie: d
             })
 
 
-def _scan_dataset(
-    ds: Dataset, seg: dict, dt: dict, ie: dict, ap: dict,
-    patient_id: str | None, include_disconnected: bool,
-) -> tuple[list[dict], int]:
-    """Scan every capture (or one patient's) and return the full, sorted,
-    unpaginated notification list. This is the expensive part of
-    /api/notifications — cached by the caller (see `notification_cache` on
-    Dataset) since these params rarely change between requests.
-    """
-    seg_echo = {k: seg[k] for k in _SEG_KEYS}
-
-    all_notifications: list[dict] = []
-    scanned = 0
-    for p in ds.patients:
-        if patient_id and p["patient_id"] != patient_id:
-            continue
-        for c in p["captures"]:
-            if not include_disconnected and not c["connected"]:
-                continue
-            fname = c["raw_data"]
-            wf = load_waveform(ds.data_dir / fname)
-            events, _base_val, _n = _scan_capture(wf, fname, seg, dt, ie, ap)
-            scanned += 1
-            for e in events:
-                all_notifications.append({
-                    "patient_id": p["patient_id"],
-                    "raw_data": fname,
-                    "day": c["day"],
-                    "time": c["time"],
-                    **e,
-                    "segmentation": seg_echo,
-                })
-
-    all_notifications.sort(key=_notification_sort_key, reverse=True)
-    return all_notifications, scanned
-
-
-def _notif_cache_key(seg, dt, ie, ap, patient_id, include_disconnected):
-    """A hashable key covering every param that affects the scan result."""
-    return (
-        tuple(sorted(seg.items())), tuple(sorted(dt.items())),
-        tuple(sorted(ie.items())), tuple(sorted(ap.items())),
-        patient_id, include_disconnected,
-    )
-
-
 @router.get("/notifications")
 def get_notifications(
     seg: dict = Depends(segmentation_params),
@@ -343,14 +297,17 @@ def get_notifications(
     page_size: int = Query(10, ge=1, le=100),
     ds: Dataset = Depends(get_dataset),
 ):
-    key = _notif_cache_key(seg, dt, ie, ap, patient_id, include_disconnected)
-    cached = ds.notification_cache.get(key)
-    if cached is None:
-        cached = _scan_dataset(ds, seg, dt, ie, ap, patient_id, include_disconnected)
-        ds.notification_cache[key] = cached
-    all_notifications, scanned = cached
+    scan = get_or_create_scan(ds, seg, dt, ie, ap, patient_id, include_disconnected)
 
-    total = len(all_notifications)
+    needed = page * page_size
+    if not scan.complete and len(scan.results) < needed:
+        advance_scan(ds, scan, seg, dt, ie, ap, needed)
+
+    # results can complete out of claim-order under concurrent advancing
+    # (two captures processed in parallel may finish in either order), so
+    # re-sort before slicing rather than trusting append order.
+    ordered = sorted(scan.results, key=_capture_sort_key, reverse=True)
+    total = len(ordered)
     start = (page - 1) * page_size
     page_items = ordered[start : start + page_size]
 
@@ -367,11 +324,10 @@ def get_notifications(
 
 
 def warmup_notifications(ds: Dataset) -> None:
-    """Pre-run the exact scan the Notifications page always requests (it has
+    """Advance the exact scan the Notifications page always requests (it has
     no tunable controls, so this is the only param combination it ever asks
-    for) and cache it, so the very first visitor never waits on a full scan —
-    called once at server startup, mirroring how `ds.index` is force-built
-    eagerly in main.py's lifespan.
+    for) to completion in the background, called once at server startup —
+    later requests increasingly find it already fully scanned.
     """
     seg = segmentation_params(
         baseline="slope", hysteresis=0.0, slope=0.0, sdelta=100.0,
@@ -383,5 +339,5 @@ def warmup_notifications(ds: Dataset) -> None:
         pressure_prominence=1.5, concurrent_tol_sec=0.3, bump_lookback_sec=0.4,
     )
     ap = auto_peep_params(flow_frac=0.15, flow_abs=2.0, peep_min=1.0, require_pressure=True)
-    key = _notif_cache_key(seg, dt, ie, ap, None, False)
-    ds.notification_cache[key] = _scan_dataset(ds, seg, dt, ie, ap, None, False)
+    scan = get_or_create_scan(ds, seg, dt, ie, ap, None, False)
+    advance_scan(ds, scan, seg, dt, ie, ap, needed=len(scan.pending))
