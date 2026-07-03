@@ -1,13 +1,13 @@
 """Asynchrony detection + notification API.
 
-    GET /api/asynchrony?file=...&<segmentation>&<double-trigger>&<ineffective-effort>&<auto-peep>
+    GET /api/asynchrony?file=...&<segmentation>&<double-trigger>&<ineffective-effort>&<auto-peep>&<flow-starvation>
     GET /api/auto-peep?file=...&<segmentation>&<auto-peep formula>   (single capture, auto-PEEP only)
     GET /api/notifications?<same params>&patient_id=&include_disconnected=&page=&page_size=
 
 Segmentation query params are identical to /api/breaths (event timing comes
 directly from the chosen breath boundaries). See backend/asynchrony.py,
-backend/ineffective_effort.py, and backend/auto_peep.py for the three
-detection formulas.
+backend/ineffective_effort.py, backend/auto_peep.py, and
+backend/flow_starvation.py for the four detection formulas.
 
 Every event, regardless of `type`, carries two generalized fields so the
 frontend never needs per-type branching: `t0`/`t1` (the span to highlight on
@@ -33,6 +33,7 @@ from parser import load_waveform
 from asynchrony import detect_double_triggers
 from ineffective_effort import detect_ineffective_efforts
 from auto_peep import detect_auto_peep
+from flow_starvation import detect_flow_starvation
 
 from ..dataset import Dataset, NotificationScan, denan
 from ..deps import get_dataset
@@ -47,6 +48,7 @@ _IE_FIELDS = ("breath_idx_a", "breath_idx_b", "t_flow_peak", "t_pressure_trough"
               "flow_prominence", "pressure_prominence", "dt_sec")
 _AP_FIELDS = ("flow_residual_frac", "peep_delta", "eef", "z_ref",
               "eep", "set_peep", "residual", "peak_mag", "pressure_flag")
+_FS_FIELDS = ("breath_idx_a", "dip_pressure", "prominence_before", "prominence_after", "flow_range")
 
 
 def segmentation_params(
@@ -101,8 +103,20 @@ def auto_peep_params(
     }
 
 
-def _scan_capture(wf, fname: str, seg: dict, dt: dict, ie: dict, ap: dict) -> tuple[list[dict], float, int]:
-    """Run both detectors on one capture's waveform; returns (events, baseline, n_breaths)."""
+def flow_starvation_params(
+    dip_prominence: float = Query(2.0, ge=0.0, description="min rise-before AND rise-after (cmH2O) around a candidate inspiratory pressure notch"),
+    lookback_sec: float = Query(0.4, gt=0.0, description="how far back/forward the notch's prominence is measured; bounds it to a local, not window-wide, reference"),
+    require_constant_flow: bool = Query(False, description="also require the inspiratory flow trace to stay flat (volume-control-like); off by default"),
+    flow_range_max: float = Query(20.0, gt=0.0, description="max inspiratory flow range (L/min) allowed when require_constant_flow is on"),
+) -> dict:
+    return {
+        "dip_prominence": dip_prominence, "lookback_sec": lookback_sec,
+        "require_constant_flow": require_constant_flow, "flow_range_max": flow_range_max,
+    }
+
+
+def _scan_capture(wf, fname: str, seg: dict, dt: dict, ie: dict, ap: dict, fs: dict) -> tuple[list[dict], float, int]:
+    """Run every detector on one capture's waveform; returns (events, baseline, n_breaths)."""
     breaths, base_val = segment_from_params(
         wf, fname, seg["baseline"], seg["hysteresis"], seg["slope"], seg["sdelta"],
         seg["swin"], seg["srefr"], seg["sguard"], seg["speak_val"],
@@ -156,14 +170,30 @@ def _scan_capture(wf, fname: str, seg: dict, dt: dict, ie: dict, ap: dict) -> tu
             **{k: e[k] for k in _AP_FIELDS},
         })
 
+    fs_events = detect_flow_starvation(
+        breaths, wf["flow"].to_numpy(), wf["pressure"].to_numpy(),
+        dip_prominence=fs["dip_prominence"], lookback_sec=fs["lookback_sec"],
+        require_constant_flow=fs["require_constant_flow"], flow_range_max=fs["flow_range_max"],
+    )
+    for e in fs_events.to_dict(orient="records"):
+        scoop = min(e["prominence_before"], e["prominence_after"])
+        events.append({
+            "type": "flow_starvation",
+            "t0": e["t_start"],
+            "t1": e["t_end"],
+            "detail": f"pressure scoop -{scoop:.1f} cmH2O",
+            **{k: e[k] for k in _FS_FIELDS},
+        })
+
     return events, base_val, len(breaths)
 
 
-def _formula_block(dt: dict, ie: dict, ap: dict) -> dict:
+def _formula_block(dt: dict, ie: dict, ap: dict, fs: dict) -> dict:
     return {
         "double_trigger": {"criterion": "te_gap < ratio * ti_ref", **dt},
         "ineffective_effort": {"criterion": "concordant flow-bump + pressure-dip within concurrent_tol_sec", **ie},
         "auto_peep": {"criterion": "flow_residual_frac > flow_frac (+ peep_delta > peep_min)", **ap},
+        "flow_starvation": {"criterion": "rise-dip-rise notch in inspiratory pressure, both sides >= dip_prominence", **fs},
     }
 
 
@@ -174,17 +204,18 @@ def get_asynchrony(
     dt: dict = Depends(dt_params),
     ie: dict = Depends(ie_params),
     ap: dict = Depends(auto_peep_params),
+    fs: dict = Depends(flow_starvation_params),
     ds: Dataset = Depends(get_dataset),
 ):
     """All asynchrony events (every detector) for one capture."""
     require_valid(ds, file)
     wf = load_waveform(ds.data_dir / file)
-    events, base_val, n_breaths = _scan_capture(wf, file, seg, dt, ie, ap)
+    events, base_val, n_breaths = _scan_capture(wf, file, seg, dt, ie, ap, fs)
     return denan({
         "events": events,
         "n_breaths": n_breaths,
         "baseline": base_val,
-        "formula": _formula_block(dt, ie, ap),
+        "formula": _formula_block(dt, ie, ap, fs),
     })
 
 
@@ -215,6 +246,33 @@ def get_auto_peep_only(
     })
 
 
+@router.get("/flow-starvation")
+def get_flow_starvation_only(
+    file: str = Query(..., description="capture CSV filename from /api/index"),
+    seg: dict = Depends(segmentation_params),
+    fs: dict = Depends(flow_starvation_params),
+    ds: Dataset = Depends(get_dataset),
+):
+    """Flow-starvation events only, for one capture (see backend/flow_starvation.py)."""
+    require_valid(ds, file)
+    wf = load_waveform(ds.data_dir / file)
+    breaths, base_val = segment_from_params(
+        wf, file, seg["baseline"], seg["hysteresis"], seg["slope"], seg["sdelta"],
+        seg["swin"], seg["srefr"], seg["sguard"], seg["speak_val"],
+    )
+    events = detect_flow_starvation(
+        breaths, wf["flow"].to_numpy(), wf["pressure"].to_numpy(),
+        dip_prominence=fs["dip_prominence"], lookback_sec=fs["lookback_sec"],
+        require_constant_flow=fs["require_constant_flow"], flow_range_max=fs["flow_range_max"],
+    )
+    return denan({
+        "events": events.to_dict(orient="records"),
+        "n_breaths": len(breaths),
+        "baseline": base_val,
+        "formula": {"criterion": "rise-dip-rise notch in inspiratory pressure, both sides >= dip_prominence", **fs},
+    })
+
+
 def _capture_sort_key(capture: dict):
     day = capture["day"] if capture["day"] is not None else -1
     return (day, capture["time"] or "")
@@ -236,20 +294,20 @@ def _build_pending(ds: Dataset, patient_id: str | None, include_disconnected: bo
     return pending
 
 
-def _notif_scan_key(seg: dict, dt: dict, ie: dict, ap: dict, patient_id: str | None, include_disconnected: bool):
+def _notif_scan_key(seg: dict, dt: dict, ie: dict, ap: dict, fs: dict, patient_id: str | None, include_disconnected: bool):
     """A hashable key covering every param that affects which scan this is."""
     return (
         tuple(sorted(seg.items())), tuple(sorted(dt.items())),
-        tuple(sorted(ie.items())), tuple(sorted(ap.items())),
+        tuple(sorted(ie.items())), tuple(sorted(ap.items())), tuple(sorted(fs.items())),
         patient_id, include_disconnected,
     )
 
 
 def get_or_create_scan(
-    ds: Dataset, seg: dict, dt: dict, ie: dict, ap: dict,
+    ds: Dataset, seg: dict, dt: dict, ie: dict, ap: dict, fs: dict,
     patient_id: str | None, include_disconnected: bool,
 ) -> NotificationScan:
-    key = _notif_scan_key(seg, dt, ie, ap, patient_id, include_disconnected)
+    key = _notif_scan_key(seg, dt, ie, ap, fs, patient_id, include_disconnected)
     scan = ds.notification_scans.get(key)
     if scan is None:
         scan = NotificationScan(_build_pending(ds, patient_id, include_disconnected))
@@ -257,7 +315,7 @@ def get_or_create_scan(
     return scan
 
 
-def advance_scan(ds: Dataset, scan: NotificationScan, seg: dict, dt: dict, ie: dict, ap: dict, needed: int) -> None:
+def advance_scan(ds: Dataset, scan: NotificationScan, seg: dict, dt: dict, ie: dict, ap: dict, fs: dict, needed: int) -> None:
     """Claim and process pending captures (most-recent-first) until either
     `scan.results` has at least `needed` entries or the scan is exhausted.
     The actual per-capture work happens without holding the scan's lock, so
@@ -272,7 +330,7 @@ def advance_scan(ds: Dataset, scan: NotificationScan, seg: dict, dt: dict, ie: d
         p, c = item
         fname = c["raw_data"]
         wf = load_waveform(ds.data_dir / fname)
-        events, _base_val, _n = _scan_capture(wf, fname, seg, dt, ie, ap)
+        events, _base_val, _n = _scan_capture(wf, fname, seg, dt, ie, ap, fs)
         scan.mark_scanned()
         for e in events:
             scan.add_result({
@@ -291,17 +349,18 @@ def get_notifications(
     dt: dict = Depends(dt_params),
     ie: dict = Depends(ie_params),
     ap: dict = Depends(auto_peep_params),
+    fs: dict = Depends(flow_starvation_params),
     patient_id: str | None = Query(None, description="restrict the scan to one patient; omit to scan the whole dataset"),
     include_disconnected: bool = Query(False, description="also scan captures flagged disconnected (flat flow, no real breathing -> never produces events, skipped by default for speed)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     ds: Dataset = Depends(get_dataset),
 ):
-    scan = get_or_create_scan(ds, seg, dt, ie, ap, patient_id, include_disconnected)
+    scan = get_or_create_scan(ds, seg, dt, ie, ap, fs, patient_id, include_disconnected)
 
     needed = page * page_size
     if not scan.complete and len(scan.results) < needed:
-        advance_scan(ds, scan, seg, dt, ie, ap, needed)
+        advance_scan(ds, scan, seg, dt, ie, ap, fs, needed)
 
     # results can complete out of claim-order under concurrent advancing
     # (two captures processed in parallel may finish in either order), so
@@ -319,7 +378,7 @@ def get_notifications(
         "total_pages": max(1, -(-total // page_size)),
         "scanned_captures": scan.scanned,
         "scan_complete": scan.complete,
-        "formula": _formula_block(dt, ie, ap),
+        "formula": _formula_block(dt, ie, ap, fs),
     })
 
 
@@ -339,5 +398,8 @@ def warmup_notifications(ds: Dataset) -> None:
         pressure_prominence=1.5, concurrent_tol_sec=0.3, bump_lookback_sec=0.4,
     )
     ap = auto_peep_params(flow_frac=0.15, flow_abs=2.0, peep_min=1.0, require_pressure=True)
-    scan = get_or_create_scan(ds, seg, dt, ie, ap, None, False)
-    advance_scan(ds, scan, seg, dt, ie, ap, needed=len(scan.pending))
+    fs = flow_starvation_params(
+        dip_prominence=2.0, lookback_sec=0.4, require_constant_flow=False, flow_range_max=20.0,
+    )
+    scan = get_or_create_scan(ds, seg, dt, ie, ap, fs, None, False)
+    advance_scan(ds, scan, seg, dt, ie, ap, fs, needed=len(scan.pending))

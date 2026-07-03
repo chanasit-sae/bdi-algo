@@ -83,13 +83,15 @@ backend/
     segmentation.py     # segment_from_params (shared breath-segmentation call)
     routers/
       waveform.py      # /api/index, /api/waveform, /api/breaths
-      asynchrony.py    # /api/asynchrony, /api/auto-peep, /api/notifications (see docs/asynchrony.md)
+      asynchrony.py    # /api/asynchrony, /api/auto-peep, /api/flow-starvation,
+                       # /api/notifications (see docs/asynchrony.md)
   parser.py            # (unchanged) metadata + CSV loading
   breath_segment.py    # (unchanged) segmentation algorithm
   breath_metrics.py    # (unchanged) derived per-breath metrics
   asynchrony.py         # double-triggering detection formula
   ineffective_effort.py # ineffective-effort detection formula
   auto_peep.py          # auto-PEEP (air trapping) detection formula (see auto-peep.md)
+  flow_starvation.py    # flow-starvation detection formula
   requirements.txt
 frontend/
   src/

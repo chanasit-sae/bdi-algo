@@ -16,12 +16,16 @@ import {
   DEFAULT_AP_PARAMS,
   apQuery,
   apParamsFromSearchParams,
+  DEFAULT_FS_PARAMS,
+  fsQuery,
+  fsParamsFromSearchParams,
 } from "../lib/segmentation.js";
 import CaptureSelect from "../components/CaptureSelect.jsx";
 import ControlsBar from "../components/ControlsBar.jsx";
 import DoubleTriggerControls from "../components/DoubleTriggerControls.jsx";
 import IneffectiveEffortControls from "../components/IneffectiveEffortControls.jsx";
 import AutoPeepControls from "../components/AutoPeepControls.jsx";
+import FlowStarvationControls from "../components/FlowStarvationControls.jsx";
 import WaveformChart from "../components/WaveformChart.jsx";
 import MetadataPanel from "../components/MetadataPanel.jsx";
 import BreathPanel from "../components/BreathPanel.jsx";
@@ -32,6 +36,7 @@ const DEFAULT_PARAMS = {
   ...DEFAULT_DT_PARAMS,
   ...DEFAULT_IE_PARAMS,
   ...DEFAULT_AP_PARAMS,
+  ...DEFAULT_FS_PARAMS,
 };
 
 export default function ViewerPage() {
@@ -42,6 +47,7 @@ export default function ViewerPage() {
     ...(dtParamsFromSearchParams(searchParams) || DEFAULT_DT_PARAMS),
     ...(ieParamsFromSearchParams(searchParams) || DEFAULT_IE_PARAMS),
     ...(apParamsFromSearchParams(searchParams) || DEFAULT_AP_PARAMS),
+    ...(fsParamsFromSearchParams(searchParams) || DEFAULT_FS_PARAMS),
   }));
   const [breathIdx, setBreathIdx] = useState(-1);
   const [wf, setWf] = useState(null);
@@ -137,6 +143,7 @@ export default function ViewerPage() {
   const dtOpts = useMemo(() => dtQuery(params), [params]);
   const ieOpts = useMemo(() => ieQuery(params), [params]);
   const apOpts = useMemo(() => apQuery(params), [params]);
+  const fsOpts = useMemo(() => fsQuery(params), [params]);
 
   useEffect(() => {
     if (!file) {
@@ -146,7 +153,7 @@ export default function ViewerPage() {
     }
     let cancelled = false;
     api
-      .asynchrony(file, { ...breathsOpts, ...dtOpts, ...ieOpts, ...apOpts })
+      .asynchrony(file, { ...breathsOpts, ...dtOpts, ...ieOpts, ...apOpts, ...fsOpts })
       .then((d) => {
         if (cancelled) return;
         setAsyncEvents(d.events);
@@ -156,7 +163,7 @@ export default function ViewerPage() {
     return () => {
       cancelled = true;
     };
-  }, [file, breathsOpts, dtOpts, ieOpts, apOpts]);
+  }, [file, breathsOpts, dtOpts, ieOpts, apOpts, fsOpts]);
 
   // deep link: once this capture's events are in, mark the flagged one active
   useEffect(() => {
@@ -238,6 +245,7 @@ export default function ViewerPage() {
       <DoubleTriggerControls params={params} set={set} />
       <IneffectiveEffortControls params={params} set={set} />
       <AutoPeepControls params={params} set={set} />
+      <FlowStarvationControls params={params} set={set} />
 
       <main className="viewer">
         <div className="charts">

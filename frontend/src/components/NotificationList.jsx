@@ -7,6 +7,7 @@ const TYPE_LABEL = {
   double_trigger: "Double triggering",
   ineffective_effort: "Ineffective effort",
   auto_peep: "Auto-PEEP",
+  flow_starvation: "Flow starvation",
 };
 
 // Build the Viewer deep-link for one notification: selects the same
@@ -14,7 +15,7 @@ const TYPE_LABEL = {
 // formula params that produced it, so the Viewer's own asynchrony scan is
 // guaranteed to find this same event and highlight it.
 function viewerLink(n, formula) {
-  const { double_trigger: dt, ineffective_effort: ie, auto_peep: ap } = formula;
+  const { double_trigger: dt, ineffective_effort: ie, auto_peep: ap, flow_starvation: fs } = formula;
   const sp = new URLSearchParams({
     file: n.raw_data,
     breath: String(n.breath_idx_a),
@@ -32,6 +33,10 @@ function viewerLink(n, formula) {
     flow_abs: String(ap.flow_abs),
     peep_min: String(ap.peep_min),
     require_pressure: String(ap.require_pressure),
+    dip_prominence: String(fs.dip_prominence),
+    lookback_sec: String(fs.lookback_sec),
+    require_constant_flow: String(fs.require_constant_flow),
+    flow_range_max: String(fs.flow_range_max),
   });
   return `/?${sp.toString()}`;
 }

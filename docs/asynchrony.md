@@ -2,27 +2,28 @@
 
 **Modules:** `backend/asynchrony.py` (double-triggering), `backend/ineffective_effort.py`
 (ineffective effort), `backend/auto_peep.py` (auto-PEEP — full spec in
-[auto-peep.md](../auto-peep.md)) · **Deps:** numpy + pandas (reuse `breath_segment.py` output)
+[auto-peep.md](../auto-peep.md)), `backend/flow_starvation.py` (flow starvation) ·
+**Deps:** numpy + pandas (reuse `breath_segment.py` output)
 **API:** `backend/server/routers/asynchrony.py` — `GET /api/asynchrony` (one capture,
-every detector), `GET /api/auto-peep` (one capture, auto-PEEP only), and
-`GET /api/notifications` (scans the dataset, paginated)
+every detector), `GET /api/auto-peep` and `GET /api/flow-starvation` (one capture, single
+detector each), and `GET /api/notifications` (scans the dataset, paginated)
 **Pages:**
 - **Notifications** (`frontend/src/pages/NotificationsPage.jsx`) — a plain, most-recent-first
   list of every flagged event across the whole dataset, 10 per page, using fixed default
   detection settings. No tunable controls here on purpose — click a notification to
   inspect and tune it in the Viewer.
 - **Viewer** (`frontend/src/pages/ViewerPage.jsx`) — independently detects and highlights
-  **every** flagged event (all three types) for whatever capture is currently loaded, with
-  its own Baseline/DT-formula/IE-formula/AP-formula controls. Clicking a notification
-  deep-links here with the exact segmentation *and* every formula reproduced, so the same
-  event is guaranteed to be found again and marked active (brighter band).
+  **every** flagged event (all four types) for whatever capture is currently loaded, with
+  its own Baseline/DT-formula/IE-formula/AP-formula/FS-formula controls. Clicking a
+  notification deep-links here with the exact segmentation *and* every formula reproduced,
+  so the same event is guaranteed to be found again and marked active (brighter band).
 
 Every event, regardless of which detector produced it, carries a `type` plus two
 generalized fields computed by the router: **`t0`/`t1`** (the span to highlight on a
 chart) and **`detail`** (a short human-readable summary). The frontend (highlighting,
 notification cards, the Viewer's asynchrony list) works entirely off these three fields
-and never branches on type-specific columns — adding a third detector later means adding
-it to `_scan_capture()` in the router; nothing else changes.
+and never branches on type-specific columns — adding a detector means adding it to
+`_scan_capture()` in the router; nothing else changes.
 
 ---
 
@@ -154,6 +155,51 @@ flow+pressure mix; loosening to flow-only (`require_pressure=false`) finds **4 a
 
 ---
 
+## 4. Flow starvation
+
+In **volume-controlled ventilation with constant (square-wave) flow**, the machine
+delivers a fixed flow rate regardless of patient demand. If the patient's own inspiratory
+drive exceeds that fixed flow, they keep pulling against the circuit — and since flow
+*can't* respond (it's locked by the ventilator setting), the mismatch shows up on
+**pressure** instead: the pressure-time curve, which should rise in a smooth, convex arc
+toward peak, gets pulled down mid-rise into a concave dip — a "scoop" or "scalloped" notch
+— before continuing up to peak inspiratory pressure. This is the classic bedside sign of
+flow starvation.
+
+⚠️ Same caveat as ineffective effort: **no single agreed closed-form formula** — the
+literature describes this qualitatively ("scalloped/concave pressure waveform"), not as a
+specific threshold algorithm. This is a heuristic calibrated against this dataset's own
+inspiratory pressure noise floor, not an arbitrary guess.
+
+Unlike the other three detectors, this looks at the **inspiratory** phase (double-triggering
+and ineffective effort both key off expiration; auto-PEEP scores complete breaths only —
+this one scores every breath, including the trailing partial one, since
+`insp_start_idx`/`insp_end_idx` are always well-defined).
+
+### Signature, per breath's inspiratory window (`insp_start_idx` → `insp_end_idx`)
+A **rise-dip-recovery notch** in pressure: a local minimum with a real rise both *before*
+it and *after* it, each measured with a **bounded lookback** (at most `lookback_sec` in
+either direction — the same fix ineffective-effort needed, so prominence is a local
+measure, not "the highest/lowest point anywhere else in the window"). Flagged if **both**
+the preceding rise and the following rise clear `dip_prominence` (default **2.0 cmH₂O**,
+calibrated to sit just above the ~97th percentile of this dataset's real
+`min(rise_before, rise_after)` distribution — 50th/90th/95th/99th percentiles measured as
+0.39 / 1.28 / 1.50 / 2.47 cmH₂O).
+
+**Optional secondary gate** `require_constant_flow` (default **off**): this signature
+specifically means something in *constant-flow* delivery. If enabled, also requires the
+inspiratory flow trace's own range to stay below `flow_range_max` (default **20 L/min**),
+filtering out cases where flow itself naturally varies (e.g. pressure-support's
+decelerating flow) — same "mix is optional, primary signal stands alone" pattern as
+auto-PEEP's `require_pressure`.
+
+On the sample dataset: **2 notches in 1 capture** at the default threshold (magnitudes
+3.3–4.6 cmH₂O, comfortably clear of the noise floor); loosening to `dip_prominence=1.0`
+finds 19 across 9 captures, confirming the detector responds smoothly rather than being
+stuck or exploding.
+
+---
+
 ## On the sample dataset (double-triggering)
 Under the app's recommended segmentation (`baseline="slope"`) and the clinical default
 `ratio=0.5`, double-triggering produces **zero** flagged pairs on this sample — the ~68
@@ -174,6 +220,7 @@ GET /api/asynchrony?file=<capture.csv>
     &flow_prominence=25&flow_prominence_max=60&pressure_prominence=1.5
     &concurrent_tol_sec=0.3&bump_lookback_sec=0.4
     &flow_frac=0.15&flow_abs=2.0&peep_min=1.0&require_pressure=true
+    &dip_prominence=2.0&lookback_sec=0.4&require_constant_flow=false&flow_range_max=20.0
 ```
 Segmentation params are identical to `/api/breaths`. Response:
 ```json
@@ -188,7 +235,10 @@ Segmentation params are identical to `/api/breaths`. Response:
     { "type": "auto_peep", "t0": 1.72, "t1": 2.24, "detail": "residual 24% · PEEP +1.8 cmH2O · flow+pressure",
       "breath_idx_a": 0, "flow_residual_frac": 0.235, "peep_delta": 1.76, "eef": 18.95,
       "z_ref": 31.41, "eep": 3.87, "set_peep": 2.11, "residual": 12.46, "peak_mag": 53.02,
-      "pressure_flag": true }
+      "pressure_flag": true },
+    { "type": "flow_starvation", "t0": 5.0, "t1": 5.92, "detail": "pressure scoop -3.3 cmH2O",
+      "breath_idx_a": 1, "dip_pressure": 13.74, "prominence_before": 3.33,
+      "prominence_after": 4.56, "flow_range": 40.4 }
   ],
   "n_breaths": 6,
   "baseline": 0.0,
@@ -198,15 +248,19 @@ Segmentation params are identical to `/api/breaths`. Response:
                              "flow_prominence": 25.0, "flow_prominence_max": 60.0,
                              "pressure_prominence": 1.5, "bump_lookback_sec": 0.4, ... },
     "auto_peep": { "criterion": "flow_residual_frac > flow_frac (+ peep_delta > peep_min)",
-                   "flow_frac": 0.15, "flow_abs": 2.0, "peep_min": 1.0, "require_pressure": true }
+                   "flow_frac": 0.15, "flow_abs": 2.0, "peep_min": 1.0, "require_pressure": true },
+    "flow_starvation": { "criterion": "rise-dip-rise notch in inspiratory pressure, both sides >= dip_prominence",
+                          "dip_prominence": 2.0, "lookback_sec": 0.4,
+                          "require_constant_flow": false, "flow_range_max": 20.0 }
   }
 }
 ```
 
-### `GET /api/auto-peep` — one capture, auto-PEEP only
-Same shape as `/api/double-triggers` (superseded by `/api/asynchrony` above) but for this
-one detector — mirrors [auto-peep.md](../auto-peep.md)'s own API section exactly, for
-callers that only want this detector without running the other two.
+### `GET /api/auto-peep`, `GET /api/flow-starvation` — one capture, single detector
+Same shape as `/api/double-triggers` (superseded by `/api/asynchrony` above) but for one
+detector each — `/api/auto-peep` mirrors [auto-peep.md](../auto-peep.md)'s own API section
+exactly; `/api/flow-starvation` is the equivalent for flow starvation. Both are for callers
+that only want one detector without running the other three.
 
 ### `GET /api/notifications` — incremental scan + paginate
 ```
@@ -262,6 +316,7 @@ The Notifications page builds, per card:
     &ratio=&ti_ref=&require_stacking=&stack_ratio=
     &flow_prominence=&flow_prominence_max=&pressure_prominence=&concurrent_tol_sec=&bump_lookback_sec=
     &flow_frac=&flow_abs=&peep_min=&require_pressure=
+    &dip_prominence=&lookback_sec=&require_constant_flow=&flow_range_max=
 ```
 The Viewer reads this once on mount: selects the owning patient/capture, applies the same
 segmentation and **every** formula, and selects `breath_idx_a` in the breath dropdown. It
@@ -284,4 +339,9 @@ python3 backend/ineffective_effort.py [data_dir] [--baseline slope] [--hysteresi
 
 python3 backend/auto_peep.py [data_dir] [--baseline slope] [--hysteresis N] \
     [--flow-frac 0.15] [--flow-abs 2.0] [--peep-min 1.0] [--flow-only]
+
+python3 backend/flow_starvation.py [data_dir] [--baseline slope] [--hysteresis N] \
+    [--dip-prominence 2.0] [--lookback-sec 0.4] [--require-constant-flow] [--flow-range-max 20.0]
+# --calibrate prints the dataset's real notch-prominence percentiles instead of detecting,
+# useful for re-checking the threshold if the dataset changes
 ```
