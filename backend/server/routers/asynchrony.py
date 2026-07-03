@@ -15,12 +15,14 @@ a chart) and `detail` (a short human-readable summary). Type-specific raw
 fields (te_gap, flow_prominence, peep_delta, ...) are also included for
 anyone who wants the full detail.
 
-/api/notifications scans every capture (or one patient's), runs all three
-detectors on each, and flattens everything into one paginated, most-recent-first
-list (sorted by capture day desc, then time desc — captures don't carry an
-absolute date, so cross-patient ordering is approximate). Each notification
-echoes the segmentation + formula params that produced it, so a client can
-reproduce the exact same event elsewhere (e.g. the Viewer page).
+/api/notifications is backed by a `NotificationScan` (see dataset.py): captures
+are sorted most-recent-first once, then scanned lazily, one at a time, with
+each found event appended straight to a shared results list — a page request
+only advances the scan until it has enough results to answer that page, so
+opening the Notifications page never waits on the whole dataset, and no
+capture is ever scanned twice for the same params. A background task started
+at server boot (main.py) advances the same shared scan toward completion, so
+later requests increasingly find it already done.
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ from asynchrony import detect_double_triggers
 from ineffective_effort import detect_ineffective_efforts
 from auto_peep import detect_auto_peep
 
-from ..dataset import Dataset, denan
+from ..dataset import Dataset, NotificationScan, denan
 from ..deps import get_dataset
 from ..segmentation import segment_from_params
 from ..util import require_valid, as_float
@@ -213,9 +215,74 @@ def get_auto_peep_only(
     })
 
 
-def _notification_sort_key(n: dict):
-    day = n["day"] if n["day"] is not None else -1
-    return (day, n["time"] or "")
+def _capture_sort_key(capture: dict):
+    day = capture["day"] if capture["day"] is not None else -1
+    return (day, capture["time"] or "")
+
+
+def _build_pending(ds: Dataset, patient_id: str | None, include_disconnected: bool) -> list[tuple[dict, dict]]:
+    """Every (patient, capture) pair this scan covers, sorted most-recent-first.
+    Metadata only — no waveform loading, so this is cheap even for a huge dataset.
+    """
+    pending = []
+    for p in ds.patients:
+        if patient_id and p["patient_id"] != patient_id:
+            continue
+        for c in p["captures"]:
+            if not include_disconnected and not c["connected"]:
+                continue
+            pending.append((p, c))
+    pending.sort(key=lambda pc: _capture_sort_key(pc[1]), reverse=True)
+    return pending
+
+
+def _notif_scan_key(seg: dict, dt: dict, ie: dict, ap: dict, patient_id: str | None, include_disconnected: bool):
+    """A hashable key covering every param that affects which scan this is."""
+    return (
+        tuple(sorted(seg.items())), tuple(sorted(dt.items())),
+        tuple(sorted(ie.items())), tuple(sorted(ap.items())),
+        patient_id, include_disconnected,
+    )
+
+
+def get_or_create_scan(
+    ds: Dataset, seg: dict, dt: dict, ie: dict, ap: dict,
+    patient_id: str | None, include_disconnected: bool,
+) -> NotificationScan:
+    key = _notif_scan_key(seg, dt, ie, ap, patient_id, include_disconnected)
+    scan = ds.notification_scans.get(key)
+    if scan is None:
+        scan = NotificationScan(_build_pending(ds, patient_id, include_disconnected))
+        ds.notification_scans[key] = scan
+    return scan
+
+
+def advance_scan(ds: Dataset, scan: NotificationScan, seg: dict, dt: dict, ie: dict, ap: dict, needed: int) -> None:
+    """Claim and process pending captures (most-recent-first) until either
+    `scan.results` has at least `needed` entries or the scan is exhausted.
+    The actual per-capture work happens without holding the scan's lock, so
+    this can be called concurrently (e.g. a live request racing the
+    background warmup task) without one blocking the other for long.
+    """
+    seg_echo = {k: seg[k] for k in _SEG_KEYS}
+    while len(scan.results) < needed:
+        item = scan.claim_next()
+        if item is None:
+            break
+        p, c = item
+        fname = c["raw_data"]
+        wf = load_waveform(ds.data_dir / fname)
+        events, _base_val, _n = _scan_capture(wf, fname, seg, dt, ie, ap)
+        scan.mark_scanned()
+        for e in events:
+            scan.add_result({
+                "patient_id": p["patient_id"],
+                "raw_data": fname,
+                "day": c["day"],
+                "time": c["time"],
+                **e,
+                "segmentation": seg_echo,
+            })
 
 
 def _scan_dataset(
@@ -285,7 +352,7 @@ def get_notifications(
 
     total = len(all_notifications)
     start = (page - 1) * page_size
-    page_items = all_notifications[start : start + page_size]
+    page_items = ordered[start : start + page_size]
 
     return denan({
         "notifications": page_items,
@@ -293,7 +360,8 @@ def get_notifications(
         "page_size": page_size,
         "total": total,
         "total_pages": max(1, -(-total // page_size)),
-        "scanned_captures": scanned,
+        "scanned_captures": scan.scanned,
+        "scan_complete": scan.complete,
         "formula": _formula_block(dt, ie, ap),
     })
 

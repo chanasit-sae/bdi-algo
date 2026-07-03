@@ -208,7 +208,7 @@ Same shape as `/api/double-triggers` (superseded by `/api/asynchrony` above) but
 one detector — mirrors [auto-peep.md](../auto-peep.md)'s own API section exactly, for
 callers that only want this detector without running the other two.
 
-### `GET /api/notifications` — scan + paginate
+### `GET /api/notifications` — incremental scan + paginate
 ```
 GET /api/notifications?<same params as above>
     &patient_id=<optional, restrict to one patient>
@@ -240,11 +240,17 @@ takes longer.
                         "day": 14, "time": "11:18:25", "t0": ..., "t1": ..., "detail": "...",
                         "breath_idx_a": 0, "breath_idx_b": 1, ...,
                         "segmentation": { "baseline": "slope", "hysteresis": 0.0, ... } } ],
-  "page": 1, "page_size": 10, "total": 17, "total_pages": 2,
-  "scanned_captures": 40,
+  "page": 1, "page_size": 10, "total": 18, "total_pages": 2,
+  "scanned_captures": 40, "scan_complete": true,
   "formula": { "double_trigger": {...}, "ineffective_effort": {...}, "auto_peep": {...} }
 }
 ```
+Verified on the local sample: a `page_size=1` request on a fresh (unwarmed) param
+combination scanned just **1** capture before returning; asking the same scan for more
+(`page_size=10`) resumed and scanned only **2 more** (not from scratch); forcing full
+completion (`page_size=100`) scanned all **68** and set `scan_complete: true`; five
+concurrent requests against a fresh scan all returned identical, consistent counts (no
+duplicate work, no corruption).
 
 ### The Viewer deep link
 The Notifications page builds, per card:
