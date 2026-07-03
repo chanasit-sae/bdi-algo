@@ -279,6 +279,13 @@ def _mp_notification(patient: dict, status: dict | None, threshold: float, windo
 def _all_patient_mp_notifications(
     ds: Dataset, seg: dict, mp: dict, patient_id: str | None, include_disconnected: bool
 ) -> list[dict]:
+    """Every patient at/above threshold, computed eagerly for every patient in
+    one call. Used by the dedicated /api/mechanical-power endpoint, where
+    there's no pagination story and running the whole thing synchronously is
+    expected. NOT used by /api/notifications -- see `get_or_create_mp_scan` /
+    `advance_mp_scan` below for the lazy version that keeps the Notifications
+    page from waiting on every patient's rolling window just to answer page 1.
+    """
     out = []
     for p in ds.patients:
         if patient_id and p["patient_id"] != patient_id:
@@ -288,6 +295,49 @@ def _all_patient_mp_notifications(
         if notif is not None:
             out.append(notif)
     return out
+
+
+def _build_mp_pending(ds: Dataset, patient_id: str | None) -> list[dict]:
+    """Every patient this MP scan covers -- metadata only, no waveform
+    loading, mirroring `_build_pending`'s per-capture equivalent below."""
+    return [p for p in ds.patients if not patient_id or p["patient_id"] == patient_id]
+
+
+def _mp_scan_key(seg: dict, mp: dict, patient_id: str | None, include_disconnected: bool):
+    return (tuple(sorted(seg.items())), tuple(sorted(mp.items())), patient_id, include_disconnected)
+
+
+def get_or_create_mp_scan(
+    ds: Dataset, seg: dict, mp: dict, patient_id: str | None, include_disconnected: bool
+) -> NotificationScan:
+    """One patient-level scan per distinct param combo, reusing `NotificationScan`
+    as-is (its claim/add/mark-scanned bookkeeping doesn't care whether a
+    'pending item' is a capture or a whole patient)."""
+    key = _mp_scan_key(seg, mp, patient_id, include_disconnected)
+    scan = ds.mp_scans.get(key)
+    if scan is None:
+        scan = NotificationScan(_build_mp_pending(ds, patient_id))
+        ds.mp_scans[key] = scan
+    return scan
+
+
+def advance_mp_scan(
+    ds: Dataset, scan: NotificationScan, seg: dict, mp: dict, include_disconnected: bool, needed: int
+) -> None:
+    """Claim and process pending patients until either `scan.results` has at
+    least `needed` flagged patients or every patient has been checked -- the
+    same bounded-work-per-request pattern as `advance_scan`, just one patient
+    at a time instead of one capture at a time, so a Notifications page
+    request never blocks on every patient's rolling window either."""
+    while len(scan.results) < needed:
+        p = scan.claim_next()
+        if p is None:
+            break
+        status = _patient_mp_raw(ds, seg, p, mp["window_hours"], include_disconnected)
+        scan.mark_scanned()
+        notif = _mp_notification(p, status, mp["threshold"], mp["window_hours"], seg)
+        if notif is not None:
+            scan.add_result(notif)
 
 
 @router.get("/asynchrony")
@@ -494,21 +544,23 @@ def get_notifications(
     ds: Dataset = Depends(get_dataset),
 ):
     scan = get_or_create_scan(ds, seg, dt, ie, ap, fs, patient_id, include_disconnected)
+    mp_scan = get_or_create_mp_scan(ds, seg, mp, patient_id, include_disconnected)
 
+    # Mechanical power is patient-level, not per-capture, so it can't share
+    # the breath-event scan above -- it gets its own NotificationScan over
+    # patients instead of captures, advanced with the exact same "only do
+    # enough work for this page" bound, so a page request never waits on
+    # either the whole capture list OR every patient's rolling window.
     needed = page * page_size
     if not scan.complete and len(scan.results) < needed:
         advance_scan(ds, scan, seg, dt, ie, ap, fs, needed)
-
-    # Mechanical power is patient-level, not per-capture, so it isn't part of
-    # the breath-event NotificationScan above -- it's computed separately
-    # (cheaply, since each patient's own MP is cached per (patient, seg,
-    # window) in ds.mp_cache) and merged in before the final sort+slice.
-    mp_notifs = _all_patient_mp_notifications(ds, seg, mp, patient_id, include_disconnected)
+    if not mp_scan.complete and len(mp_scan.results) < needed:
+        advance_mp_scan(ds, mp_scan, seg, mp, include_disconnected, needed)
 
     # results can complete out of claim-order under concurrent advancing
     # (two captures processed in parallel may finish in either order), so
     # re-sort before slicing rather than trusting append order.
-    ordered = sorted(scan.results + mp_notifs, key=_capture_sort_key, reverse=True)
+    ordered = sorted(scan.results + mp_scan.results, key=_capture_sort_key, reverse=True)
     total = len(ordered)
     start = (page - 1) * page_size
     page_items = ordered[start : start + page_size]
@@ -520,7 +572,7 @@ def get_notifications(
         "total": total,
         "total_pages": max(1, -(-total // page_size)),
         "scanned_captures": scan.scanned,
-        "scan_complete": scan.complete,
+        "scan_complete": scan.complete and mp_scan.complete,
         "formula": _formula_block(dt, ie, ap, fs, mp),
     })
 
@@ -548,5 +600,5 @@ def warmup_notifications(ds: Dataset) -> None:
     advance_scan(ds, scan, seg, dt, ie, ap, fs, needed=len(scan.pending))
 
     mp = mp_params(threshold=17.0, window_hours=24.0)
-    for p in ds.patients:
-        _patient_mp_raw(ds, seg, p, mp["window_hours"], False)
+    mp_scan = get_or_create_mp_scan(ds, seg, mp, None, False)
+    advance_mp_scan(ds, mp_scan, seg, mp, False, needed=len(mp_scan.pending))

@@ -362,17 +362,21 @@ later page request or the background warmup below. Concurrent callers (e.g. a li
 racing the warmup) claim different captures under a lock but do the actual
 load-and-detect work outside it, so they don't block each other for long.
 
-Mechanical power isn't part of that scan (it's patient-level, not per-capture — a single
-capture is never "done" for MP until the whole patient's rolling window has been walked).
-Instead, `get_notifications()` separately computes `_all_patient_mp_notifications()` for
-every matching patient (each one cheap and cached — see the `/api/mechanical-power` section
-above) and merges the result into the same list before the final sort + page slice, so it
-appears inline with everything else, most-recent-first.
+Mechanical power can't share that scan (it's patient-level, not per-capture — a single
+capture is never "done" for MP until the whole patient's rolling window has been walked),
+so it gets its **own** `NotificationScan` instance (the class doesn't care whether a
+"pending item" is a capture or a whole patient) over `ds.patients` instead of captures.
+`get_notifications()` advances it with the exact same bound as the capture scan — stop once
+`page * page_size` patients have been found at/above threshold, or every patient's been
+checked — so a page request never waits on every patient's rolling window either, only on
+`_patient_mp_raw()`'s own per-patient cache. The two scans' results are merged into one list
+before the final sort + page slice, so mechanical-power notifications appear inline with
+everything else, most-recent-first, and `scan_complete` reflects both scans together.
 
 A background task started in `main.py`'s lifespan (`asyncio.to_thread`, so it doesn't
 block the app from accepting requests) advances the *default* param combination — the only
 one the Notifications page ever asks for, since it has no tunable controls — all the way to
-completion, and warms every patient's MP cache alongside it. In practice this means the
+completion for **both** scans. In practice this means the
 first real visitor rarely waits on a cold scan at all, and every request after that is an
 instant slice of an already-built list.
 

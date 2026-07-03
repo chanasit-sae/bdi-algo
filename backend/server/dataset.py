@@ -129,17 +129,23 @@ class Dataset:
     `notification_scans` holds one NotificationScan per distinct set of
     detection params the asynchrony router has ever been asked for — owned
     here (rather than module-level in the router) so it lives and dies with
-    this one server process/instance, same as `_index`. `mp_cache` is the
-    equivalent for per-patient rolling mechanical power (see mechanical_power.py):
-    unlike the breath-level detectors it needs *all* of one patient's captures
-    within the rolling window before it means anything, so it's cached per
-    (patient_id, params) rather than advanced incrementally.
+    this one server process/instance, same as `_index`. Mechanical power gets
+    two caches: `mp_scans` is another NotificationScan (reused as-is — its
+    claim/add/mark logic doesn't care what a "pending item" is), one per
+    patient this time instead of one per capture, advanced with the same
+    bounded-per-request pattern so a page request never waits on every
+    patient's rolling window either. `mp_cache` sits underneath that: each
+    patient's own rolling-average computation (see mechanical_power.py),
+    keyed by (patient_id, segmentation, window_hours) -- NOT by threshold, so
+    the same number is reused whether it's being checked against 17.0 J/min
+    via /api/notifications or a different threshold via /api/mechanical-power.
     """
 
     def __init__(self, data_dir: Path):
         self.data_dir = data_dir
         self._index: dict | None = None
         self.notification_scans: dict = {}
+        self.mp_scans: dict = {}
         self.mp_cache: dict = {}
 
     @property
