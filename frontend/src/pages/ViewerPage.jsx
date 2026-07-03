@@ -111,10 +111,12 @@ export default function ViewerPage() {
   }, [patientId]);
 
   // Fetch MP + AI for every patient once the patient list is in, for the
-  // all-patients summary table. Each patient's own fetch updates just that
-  // patient's row as soon as it resolves (not a single Promise.all over
-  // everyone) so the table fills in progressively instead of the whole
-  // thing waiting on the slowest patient.
+  // all-patients summary table. Each patient is fetched ONE AT A TIME (not
+  // all N fired concurrently) -- MP/AI are both heavy, real per-capture
+  // computations, and firing 2*N of them at once for every patient starves
+  // out the far lighter, more urgent waveform/breaths fetches for whatever
+  // capture is actually on screen. A row still updates as soon as its own
+  // patient resolves, so the table fills in progressively either way.
   useEffect(() => {
     if (!patients || !patients.length) {
       setPatientSummary({});
@@ -124,20 +126,22 @@ export default function ViewerPage() {
     setPatientSummary(
       Object.fromEntries(patients.map((p) => [p.patient_id, { mp: null, ai: null, loading: true }]))
     );
-    patients.forEach((p) => {
-      Promise.all([api.mechanicalPower(p.patient_id), api.asynchronyIndex(p.patient_id)])
-        .then(([mp, ai]) => {
+    (async () => {
+      for (const p of patients) {
+        if (cancelled) return;
+        try {
+          const [mp, ai] = await Promise.all([api.mechanicalPower(p.patient_id), api.asynchronyIndex(p.patient_id)]);
           if (cancelled) return;
           setPatientSummary((prev) => ({
             ...prev,
             [p.patient_id]: { mp: mp.status ? mp.status.avg_mp_j_per_min : null, ai: ai.asynchrony_index, loading: false },
           }));
-        })
-        .catch(() => {
+        } catch {
           if (cancelled) return;
           setPatientSummary((prev) => ({ ...prev, [p.patient_id]: { mp: null, ai: null, loading: false } }));
-        });
-    });
+        }
+      }
+    })();
     return () => {
       cancelled = true;
     };
