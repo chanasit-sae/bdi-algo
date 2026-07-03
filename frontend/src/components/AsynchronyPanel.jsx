@@ -5,6 +5,7 @@ const TYPE_LABEL = {
   double_trigger: "Double triggering",
   ineffective_effort: "Ineffective effort",
   auto_peep: "Auto-PEEP",
+  flow_starvation: "Flow starvation",
 };
 
 // List of flagged asynchrony events for the currently loaded capture. Clicking

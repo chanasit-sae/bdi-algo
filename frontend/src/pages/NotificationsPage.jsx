@@ -46,10 +46,11 @@ export default function NotificationsPage() {
           Notifications
         </h2>
         <p className="muted" style={{ fontSize: 12, maxWidth: 760 }}>
-          Detects <strong>double triggering</strong>, <strong>ineffective effort</strong>, and{" "}
-          <strong>auto-PEEP</strong> across the dataset using fixed default settings. Click a
-          notification to inspect the flagged breaths in the Viewer, where detection can be
-          tuned. See <code>docs/asynchrony.md</code> for all three formulas.
+          Detects <strong>double triggering</strong>, <strong>ineffective effort</strong>,{" "}
+          <strong>auto-PEEP</strong>, and <strong>flow starvation</strong> across the dataset
+          using fixed default settings. Click a notification to inspect the flagged breaths in
+          the Viewer, where detection can be tuned. See <code>docs/asynchrony.md</code> for all
+          four formulas.
         </p>
 
         {formula && <NotificationList notifications={notifications} formula={formula} />}

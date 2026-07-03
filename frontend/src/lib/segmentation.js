@@ -149,3 +149,31 @@ export function apParamsFromSearchParams(sp) {
     requirePressure: sp.get("require_pressure") !== "false",
   };
 }
+
+// Defaults for the flow-starvation formula (rise-dip-rise notch in
+// inspiratory pressure) — see backend/flow_starvation.py.
+export const DEFAULT_FS_PARAMS = {
+  dipProminence: 2.0,
+  lookback: 0.4,
+  requireConstantFlow: false,
+  flowRangeMax: 20.0,
+};
+
+export function fsQuery(params) {
+  return {
+    dip_prominence: params.dipProminence,
+    lookback_sec: params.lookback,
+    require_constant_flow: params.requireConstantFlow,
+    flow_range_max: params.flowRangeMax,
+  };
+}
+
+export function fsParamsFromSearchParams(sp) {
+  if (!sp.has("dip_prominence")) return null;
+  return {
+    dipProminence: Number(sp.get("dip_prominence")) || DEFAULT_FS_PARAMS.dipProminence,
+    lookback: Number(sp.get("lookback_sec") ?? DEFAULT_FS_PARAMS.lookback),
+    requireConstantFlow: sp.get("require_constant_flow") === "true",
+    flowRangeMax: Number(sp.get("flow_range_max") ?? DEFAULT_FS_PARAMS.flowRangeMax),
+  };
+}
