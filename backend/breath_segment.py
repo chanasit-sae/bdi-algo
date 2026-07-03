@@ -164,7 +164,7 @@ def segment_capture(
     slope_delta: float = 100.0,
     slope_refractory_sec: float = 1.0,
     slope_exp_guard: float = 100.0,
-    slope_peak_min: float = 60.0,
+    slope_peak_min: float | str = 60.0,
 ) -> pd.DataFrame:
     """Segment one waveform DataFrame (from load_waveform) into breaths.
 
@@ -181,8 +181,8 @@ def segment_capture(
         breath start, the minimum spacing between onsets (seconds), the expiratory
         guard (L/min per second) that drops candidates preceded by a steep flow
         *decrease* i.e. the expiratory limb, and the minimum peak inspiratory flow
-        (L/min) the rise must reach for the onset to count (see
-        `_detect_slope_onsets`).
+        (L/min) the rise must reach for the onset to count, or "mean" to use the
+        whole-capture average flow as that threshold (see `_detect_slope_onsets`).
     """
     flow = wf["flow"].to_numpy()
     slope_mode = baseline == "slope"
@@ -203,8 +203,11 @@ def segment_capture(
     if slope_mode:
         window = max(1, int(round(slope_window_sec * SAMPLE_RATE_HZ)))
         refractory = max(1, int(round(slope_refractory_sec * SAMPLE_RATE_HZ)))
+        # "mean" -> use the whole-capture average flow as the peak-flow threshold
+        peak_min = (float(np.mean(flow)) if slope_peak_min == "mean"
+                    else float(slope_peak_min))
         rising = _detect_slope_onsets(flow, window, slope_delta, refractory,
-                                      slope_exp_guard, slope_peak_min)
+                                      slope_exp_guard, peak_min)
         _, falling = _detect_crossings(flow, base, hysteresis)
     else:
         rising, falling = _detect_crossings(flow, base, hysteresis, slope_threshold)
@@ -266,7 +269,7 @@ def segment_dataset(
     slope_delta: float = 100.0,
     slope_refractory_sec: float = 1.0,
     slope_exp_guard: float = 100.0,
-    slope_peak_min: float = 60.0,
+    slope_peak_min: float | str = 60.0,
 ) -> pd.DataFrame:
     """Segment every capture referenced in a data directory into one breath table.
 
@@ -351,15 +354,17 @@ if __name__ == "__main__":
                     help="baseline=slope: drop onsets preceded by a steep flow "
                          "decrease (expiratory limb); min pre-onset slope below "
                          "this magnitude (L/min per second) is rejected (0 = off, default 100)")
-    ap.add_argument("--slope-peak-min", type=float, default=60.0,
-                    help="baseline=slope: min peak inspiratory flow (L/min) the rise "
-                         "must reach for an onset to count; ~60-90 for a normal adult "
-                         "(0 = off, default 60)")
+    ap.add_argument("--slope-peak-min", default="60",
+                    help='baseline=slope: min peak inspiratory flow (L/min) the rise '
+                         'must reach for an onset to count; ~60-90 for a normal adult, '
+                         'or "mean" to use the whole-capture average flow '
+                         '(0 = off, default 60)')
     args = ap.parse_args()
 
     baseline = args.baseline
     if baseline not in ("zero", "auto", "patient", "slope"):
         baseline = float(baseline)
+    peak_min = args.slope_peak_min if args.slope_peak_min == "mean" else float(args.slope_peak_min)
     breaths = segment_dataset(args.data_dir, min_breath_sec=args.min_breath_sec,
                               baseline=baseline, hysteresis=args.hysteresis,
                               slope_threshold=args.slope_threshold,
@@ -367,7 +372,7 @@ if __name__ == "__main__":
                               slope_delta=args.slope_delta,
                               slope_refractory_sec=args.slope_refractory_sec,
                               slope_exp_guard=args.slope_exp_guard,
-                              slope_peak_min=args.slope_peak_min)
+                              slope_peak_min=peak_min)
     n_partial = int((~breaths["is_complete"]).sum())
     print(f"segmented {breaths['raw_data'].nunique()} captures "
           f"into {len(breaths)} breaths "

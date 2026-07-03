@@ -82,7 +82,10 @@ flags a breath start when the jump exceeds `slope_delta`:
   and is skipped. A normal adult inspiratory peak is ~60–90 L/min. On this sample the
   real cycling onsets (`2a7b9f…`) peak ~91–93 L/min, while the onsets that survive the
   exp-guard have a peak median ~78 (p25 ~65, p10 ~59); a **60** cut keeps ~87% (100/115)
-  of them and clears the residual low-amplitude noise.
+  of them and clears the residual low-amplitude noise. Pass **`"mean"`** instead of a
+  number to use the **whole-capture average flow** as the threshold — an adaptive,
+  capture-relative floor for signals whose absolute scale is offset (a real breath's
+  peak sits well above the capture mean, while noise wobble does not).
 
 In this mode expiration onsets (`insp_end`) still come from the level crossing of the
 per-capture `auto` baseline, so `ti`/`te` and the volume/pressure metrics stay defined.

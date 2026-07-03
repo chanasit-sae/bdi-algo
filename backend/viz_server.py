@@ -154,9 +154,10 @@ INDEX_HTML = r"""<!doctype html>
   <div><label title="Baseline=slope: drop onsets preceded by a steep flow DECREASE (expiratory limb); pre-onset slope below this magnitude (L/min per second) is rejected. 0 = off">ExpGuard</label>
     <input id="sguard" type="number" value="100" min="0" step="10" style="width:64px;
       background:#0b1119;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px"></div>
-  <div><label title="Baseline=slope: min peak inspiratory flow (L/min) the rise must reach for an onset to count; ~60-90 for a normal adult. 0 = off">PeakMin</label>
+  <div><label title="Baseline=slope: min peak inspiratory flow (L/min) the rise must reach for an onset to count; ~60-90 for a normal adult. 0 = off. Tick 'avg' to use the whole-capture average flow as the threshold instead.">PeakMin</label>
     <input id="speak" type="number" value="60" min="0" step="5" style="width:64px;
-      background:#0b1119;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px"></div>
+      background:#0b1119;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px">
+    <label style="font-weight:400;margin-left:4px" title="use the whole-capture average flow as the PeakMin threshold"><input id="speakMean" type="checkbox" style="vertical-align:middle"> avg</label></div>
   <div><label title="also list flat captures where the ventilator is not connected to a patient">Show disconnected</label>
     <input id="showDisc" type="checkbox"></div>
   <span class="muted" id="status"></span>
@@ -254,7 +255,8 @@ async function selectCapture(file){
   const swin = parseFloat(document.getElementById('swin').value) || 0.32;
   const srefr = parseFloat(document.getElementById('srefr').value) || 0;
   const sguard = parseFloat(document.getElementById('sguard').value) || 0;
-  const speak = parseFloat(document.getElementById('speak').value) || 0;
+  const speak = document.getElementById('speakMean').checked
+    ? 'mean' : (parseFloat(document.getElementById('speak').value) || 0);
   const mode = document.getElementById('baseline').value;
   const baseline = (mode === 'manual')
     ? (parseFloat(document.getElementById('baseoff').value) || 0)
@@ -340,7 +342,8 @@ function syncBaselineUI(){
   setEnabled('swin', slopeMode);
   setEnabled('srefr', slopeMode);
   setEnabled('sguard', slopeMode);
-  setEnabled('speak', slopeMode);
+  setEnabled('speakMean', slopeMode);
+  setEnabled('speak', slopeMode && !document.getElementById('speakMean').checked);
   // the level-crossing slope gate / hysteresis don't apply in slope mode
   setEnabled('slope', !slopeMode);
   setEnabled('hyst', !slopeMode);
@@ -377,6 +380,7 @@ async function init(){
   document.getElementById('slope').onchange = () => { if(CUR.file) selectCapture(CUR.file); };
   for(const id of ['sdelta','swin','srefr','sguard','speak'])
     document.getElementById(id).onchange = () => { if(CUR.file) selectCapture(CUR.file); };
+  document.getElementById('speakMean').onchange = () => { syncBaselineUI(); if(CUR.file) selectCapture(CUR.file); };
   document.getElementById('baseline').onchange = () => { syncBaselineUI(); if(CUR.file) selectCapture(CUR.file); };
   document.getElementById('baseoff').oninput = () => { if(CUR.file) selectCapture(CUR.file); };
   syncBaselineUI();
@@ -453,7 +457,8 @@ class Handler(BaseHTTPRequestHandler):
             swin = max(0.04, _qf("swin", 0.32))
             srefr = max(0.0, _qf("srefr", 1.0))
             sguard = max(0.0, _qf("sguard", 100.0))
-            speak = max(0.0, _qf("speak", 60.0))
+            speak_raw = qs.get("speak", ["60"])[0]
+            speak = "mean" if speak_raw == "mean" else max(0.0, _qf("speak", 60.0))
             baseline = qs.get("baseline", ["zero"])[0]
             wf = load_waveform(self.data_dir / fname)
             if baseline == "auto":
