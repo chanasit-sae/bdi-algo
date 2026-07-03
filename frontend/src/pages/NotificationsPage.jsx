@@ -1,26 +1,48 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
-import NotificationList from "../components/NotificationList.jsx";
+import NotificationList, { TYPE_LABEL } from "../components/NotificationList.jsx";
 
 const PAGE_SIZE = 10;
+const ALL_TYPES = Object.keys(TYPE_LABEL);
 
 // Notification center: scans the dataset for asynchrony (double-triggering,
 // ineffective effort) using fixed default settings and lists what it finds,
 // most recent first, 10 at a time. No tunable controls here on purpose —
 // that's what the Viewer's controls are for, once you've clicked through to
-// a specific event.
+// a specific event. The one filter that IS available is by notification
+// type (which detector flagged it), since that's just picking which already-
+// found results to show, not a detection-formula setting.
 export default function NotificationsPage() {
   const [page, setPage] = useState(1);
+  const [enabledTypes, setEnabledTypes] = useState(() => new Set(ALL_TYPES));
   const [notifications, setNotifications] = useState([]);
   const [formula, setFormula] = useState(null);
   const [totalPages, setTotalPages] = useState(1);
   const [status, setStatus] = useState("");
 
+  function toggleType(t) {
+    setEnabledTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(t)) next.delete(t);
+      else next.add(t);
+      return next;
+    });
+    setPage(1);
+  }
+
   useEffect(() => {
     let cancelled = false;
+    if (enabledTypes.size === 0) {
+      setNotifications([]);
+      setTotalPages(1);
+      setStatus("no types selected");
+      return;
+    }
     setStatus("scanning …");
+    const opts = { page, page_size: PAGE_SIZE };
+    if (enabledTypes.size < ALL_TYPES.length) opts.types = [...enabledTypes];
     api
-      .notifications({ page, page_size: PAGE_SIZE })
+      .notifications(opts)
       .then((d) => {
         if (cancelled) return;
         setNotifications(d.notifications);
@@ -33,7 +55,7 @@ export default function NotificationsPage() {
     return () => {
       cancelled = true;
     };
-  }, [page]);
+  }, [page, enabledTypes]);
 
   return (
     <>
@@ -53,6 +75,19 @@ export default function NotificationsPage() {
           notification to inspect it in the Viewer, where detection can be tuned. See{" "}
           <code>docs/asynchrony.md</code> for all five formulas.
         </p>
+
+        <div className="field" style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 12 }}>
+          {ALL_TYPES.map((t) => (
+            <label key={t} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+              <input
+                type="checkbox"
+                checked={enabledTypes.has(t)}
+                onChange={() => toggleType(t)}
+              />
+              {TYPE_LABEL[t]}
+            </label>
+          ))}
+        </div>
 
         {formula && <NotificationList notifications={notifications} formula={formula} />}
 

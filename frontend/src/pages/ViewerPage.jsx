@@ -30,6 +30,7 @@ import WaveformChart from "../components/WaveformChart.jsx";
 import MetadataPanel from "../components/MetadataPanel.jsx";
 import BreathPanel from "../components/BreathPanel.jsx";
 import AsynchronyPanel from "../components/AsynchronyPanel.jsx";
+import PatientSummaryPanel from "../components/PatientSummaryPanel.jsx";
 
 const DEFAULT_PARAMS = {
   ...DEFAULT_SEGMENTATION_PARAMS,
@@ -55,6 +56,11 @@ export default function ViewerPage() {
   const [baselineVal, setBaselineVal] = useState(null);
   const [asyncEvents, setAsyncEvents] = useState([]);
   const [activeEventIdx, setActiveEventIdx] = useState(-1);
+  const [asynchronyIndex, setAsynchronyIndex] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [mpStatus, setMpStatus] = useState(null);
+  const [mpLoading, setMpLoading] = useState(false);
+  const [patientSummary, setPatientSummary] = useState({}); // patient_id -> { mp, ai, loading }
   const [status, setStatus] = useState("");
 
   const appliedUrlCapture = useRef(false);
@@ -72,6 +78,75 @@ export default function ViewerPage() {
 
   const { visiblePatients, patientId, setPatientId, patient, caps, file, setFile, capture } =
     usePatientCapture(patients, params.showDisc);
+
+  // Fetch the patient's asynchrony index and rolling mechanical power once
+  // per patient selection, not on every capture switch. These are their own
+  // effects, independent of the waveform fetch below, so a slow MP/AI
+  // computation never holds up the waveform appearing -- each just shows
+  // "loading…" (see MetadataPanel) until its own fetch resolves.
+  useEffect(() => {
+    if (!patientId) {
+      setAsynchronyIndex(null);
+      setMpStatus(null);
+      setAiLoading(false);
+      setMpLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setAiLoading(true);
+    setMpLoading(true);
+    api
+      .asynchronyIndex(patientId)
+      .then((d) => !cancelled && setAsynchronyIndex(d.asynchrony_index))
+      .catch(() => !cancelled && setAsynchronyIndex(null))
+      .finally(() => !cancelled && setAiLoading(false));
+    api
+      .mechanicalPower(patientId)
+      .then((d) => !cancelled && setMpStatus(d.status))
+      .catch(() => !cancelled && setMpStatus(null))
+      .finally(() => !cancelled && setMpLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
+
+  // Fetch MP + AI for every patient once the patient list is in, for the
+  // all-patients summary table. Each patient's own fetch updates just that
+  // patient's row as soon as it resolves (not a single Promise.all over
+  // everyone) so the table fills in progressively instead of the whole
+  // thing waiting on the slowest patient.
+  useEffect(() => {
+    if (!patients || !patients.length) {
+      setPatientSummary({});
+      return;
+    }
+    let cancelled = false;
+    setPatientSummary(
+      Object.fromEntries(patients.map((p) => [p.patient_id, { mp: null, ai: null, loading: true }]))
+    );
+    patients.forEach((p) => {
+      Promise.all([api.mechanicalPower(p.patient_id), api.asynchronyIndex(p.patient_id)])
+        .then(([mp, ai]) => {
+          if (cancelled) return;
+          setPatientSummary((prev) => ({
+            ...prev,
+            [p.patient_id]: { mp: mp.status ? mp.status.avg_mp_j_per_min : null, ai: ai.asynchrony_index, loading: false },
+          }));
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setPatientSummary((prev) => ({ ...prev, [p.patient_id]: { mp: null, ai: null, loading: false } }));
+        });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [patients]);
+
+  const summaryRows = useMemo(
+    () => (patients || []).map((p) => ({ patient_id: p.patient_id, ...(patientSummary[p.patient_id] || { mp: null, ai: null, loading: true }) })),
+    [patients, patientSummary]
+  );
 
   // deep link: once patients load, jump straight to the notification's capture
   useEffect(() => {
@@ -290,11 +365,20 @@ export default function ViewerPage() {
         </div>
         <aside>
           <h2>Metadata</h2>
-          <MetadataPanel patient={patient} capture={capture} />
+          <MetadataPanel
+            patient={patient}
+            capture={capture}
+            asynchronyIndex={asynchronyIndex}
+            aiLoading={aiLoading}
+            mpStatus={mpStatus}
+            mpLoading={mpLoading}
+          />
           <h2 style={{ marginTop: 16 }}>Asynchrony</h2>
           <AsynchronyPanel events={asyncEvents} activeIdx={activeEventIdx} onSelect={selectEvent} />
           <h2 style={{ marginTop: 16 }}>Breath</h2>
           <BreathPanel breath={sel} />
+          <h2 style={{ marginTop: 16 }}>Patients (MP / AI%)</h2>
+          <PatientSummaryPanel rows={summaryRows} selectedId={patientId} />
         </aside>
       </main>
     </>

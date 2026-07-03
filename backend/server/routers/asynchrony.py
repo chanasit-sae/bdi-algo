@@ -4,7 +4,7 @@
     GET /api/auto-peep?file=...&<segmentation>&<auto-peep formula>   (single capture, auto-PEEP only)
     GET /api/flow-starvation?file=...&<segmentation>&<flow-starvation formula>   (single capture, flow-starvation only)
     GET /api/mechanical-power?<segmentation>&<mp formula>&patient_id=&include_disconnected=   (per-patient, not per-capture)
-    GET /api/notifications?<same params>&patient_id=&include_disconnected=&page=&page_size=
+    GET /api/notifications?<same params>&patient_id=&include_disconnected=&types=&page=&page_size=
 
 Segmentation query params are identical to /api/breaths (event timing comes
 directly from the chosen breath boundaries). See backend/asynchrony.py,
@@ -459,6 +459,62 @@ def get_mechanical_power(
     })
 
 
+def _patient_asynchrony_index(ds: Dataset, seg: dict, dt: dict, ie: dict, ap: dict, fs: dict, patient: dict) -> dict:
+    """asynchrony_index = total flagged-event seconds / total waveform seconds,
+    across the patient's connected captures. Cached per (patient, all params).
+    """
+    key = (
+        patient["patient_id"], tuple(sorted(seg.items())), tuple(sorted(dt.items())),
+        tuple(sorted(ie.items())), tuple(sorted(ap.items())), tuple(sorted(fs.items())),
+    )
+    if key in ds.asynchrony_index_cache:
+        return ds.asynchrony_index_cache[key]
+
+    total_async_sec = 0.0
+    total_wave_sec = 0.0
+    for c in patient["captures"]:
+        if not c["connected"]:
+            continue
+        wf = load_waveform(ds.data_dir / c["raw_data"])
+        events, _base_val, _n = _scan_capture(wf, c["raw_data"], seg, dt, ie, ap, fs)
+        total_wave_sec += float(wf["t_sec"].iloc[-1]) if len(wf) else 0.0
+        for e in events:
+            if e["t0"] is not None and e["t1"] is not None:
+                total_async_sec += e["t1"] - e["t0"]
+
+    result = {
+        "patient_id": patient["patient_id"],
+        "total_asynchrony_sec": round(total_async_sec, 3),
+        "total_waveform_sec": round(total_wave_sec, 3),
+        "asynchrony_index": round(total_async_sec / total_wave_sec, 6) if total_wave_sec > 0 else 0.0,
+    }
+    ds.asynchrony_index_cache[key] = result
+    return result
+
+
+@router.get("/asynchrony-index")
+def get_asynchrony_index(
+    seg: dict = Depends(segmentation_params),
+    dt: dict = Depends(dt_params),
+    ie: dict = Depends(ie_params),
+    ap: dict = Depends(auto_peep_params),
+    fs: dict = Depends(flow_starvation_params),
+    patient_id: str | None = Query(None, description="one patient; omit to compute for every patient"),
+    ds: Dataset = Depends(get_dataset),
+):
+    """Per-patient asynchrony index: all_asynchrony_length / all_waveform_length,
+    summed across the patient's connected captures using the four breath-level
+    detectors (mechanical power has no t0/t1 span, so it isn't part of this).
+    """
+    if patient_id:
+        patient = next((p for p in ds.patients if p["patient_id"] == patient_id), None)
+        if patient is None:
+            return denan({"error": f"unknown patient_id: {patient_id}"})
+        return denan(_patient_asynchrony_index(ds, seg, dt, ie, ap, fs, patient))
+
+    return denan({"patients": [_patient_asynchrony_index(ds, seg, dt, ie, ap, fs, p) for p in ds.patients]})
+
+
 def _capture_sort_key(capture: dict):
     day = capture["day"] if capture["day"] is not None else -1
     return (day, capture["time"] or "")
@@ -539,6 +595,7 @@ def get_notifications(
     mp: dict = Depends(mp_params),
     patient_id: str | None = Query(None, description="restrict the scan to one patient; omit to scan the whole dataset"),
     include_disconnected: bool = Query(False, description="also scan captures flagged disconnected (flat flow, no real breathing -> never produces events, skipped by default for speed)"),
+    types: list[str] | None = Query(None, description="restrict to these notification types (double_trigger, ineffective_effort, auto_peep, flow_starvation, mechanical_power); omit for all"),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     ds: Dataset = Depends(get_dataset),
@@ -561,6 +618,12 @@ def get_notifications(
     # (two captures processed in parallel may finish in either order), so
     # re-sort before slicing rather than trusting append order.
     ordered = sorted(scan.results + mp_scan.results, key=_capture_sort_key, reverse=True)
+    # Filtered after the merge (not baked into the scans themselves) so the
+    # underlying scan stays shared/cached across every filter selection --
+    # `types` only ever narrows which already-found results are shown.
+    if types:
+        allowed = set(types)
+        ordered = [n for n in ordered if n["type"] in allowed]
     total = len(ordered)
     start = (page - 1) * page_size
     page_items = ordered[start : start + page_size]

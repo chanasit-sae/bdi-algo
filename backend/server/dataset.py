@@ -147,6 +147,7 @@ class Dataset:
         self.notification_scans: dict = {}
         self.mp_scans: dict = {}
         self.mp_cache: dict = {}
+        self.asynchrony_index_cache: dict = {}
 
     @property
     def index(self) -> dict:

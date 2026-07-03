@@ -2,8 +2,9 @@ import { Link } from "react-router-dom";
 
 // Human label per notification `type`. Add new asynchrony types here as the
 // backend gains new detectors — the card layout and viewer link already work
-// off the generic t0/t1/detail fields, no other change needed.
-const TYPE_LABEL = {
+// off the generic t0/t1/detail fields, no other change needed. Exported so
+// NotificationsPage's type filter checkboxes use the same labels/order.
+export const TYPE_LABEL = {
   double_trigger: "Double triggering",
   ineffective_effort: "Ineffective effort",
   auto_peep: "Auto-PEEP",
