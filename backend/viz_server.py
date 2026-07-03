@@ -20,7 +20,7 @@ from urllib.parse import urlparse, parse_qs
 import numpy as np
 
 from parser import load_dataset, metadata_frame, load_waveform, SAMPLE_RATE_HZ
-from breath_segment import segment_capture, estimate_baseline
+from breath_segment import segment_capture, estimate_baseline, slope_baseline
 from breath_metrics import add_metrics
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -133,7 +133,7 @@ INDEX_HTML = r"""<!doctype html>
   <div><label>Capture</label><select id="capture"></select></div>
   <div><label>Breath</label><select id="breath"></select></div>
   <div><label title="crossing baseline: zero, auto = per-capture low-percentile offset, manual = the offset field, slope = adaptive slope-change onset detection (level-agnostic)">Baseline</label>
-    <select id="baseline"><option value="zero">zero</option><option value="auto">auto</option><option value="manual">manual</option><option value="slope">slope</option></select></div>
+    <select id="baseline"><option value="zero">zero</option><option value="auto">auto</option><option value="manual">manual</option><option value="slope" selected>slope</option></select></div>
   <div><label title="manual crossing-baseline offset (L/min); used when Baseline = manual">Offset</label>
     <input id="baseoff" type="number" value="0" step="1" style="width:64px;
       background:#0b1119;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px"></div>
@@ -158,7 +158,7 @@ INDEX_HTML = r"""<!doctype html>
   <div><label title="Baseline=slope: min peak inspiratory flow (L/min) the rise must reach for an onset to count; ~60-90 for a normal adult. 0 = off. Tick 'avg' to use the whole-capture average flow as the threshold instead.">PeakMin</label>
     <input id="speak" type="number" value="60" min="0" step="5" style="width:64px;
       background:#0b1119;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px">
-    <label style="font-weight:400;margin-left:4px" title="use the whole-capture average flow as the PeakMin threshold"><input id="speakMean" type="checkbox" style="vertical-align:middle"> avg</label></div>
+    <label style="font-weight:400;margin-left:4px" title="use the whole-capture average flow as the PeakMin threshold"><input id="speakMean" type="checkbox" checked style="vertical-align:middle"> avg</label></div>
   <div><label title="also list flat captures where the ventilator is not connected to a patient">Show disconnected</label>
     <input id="showDisc" type="checkbox"></div>
   <span class="muted" id="status"></span>
@@ -472,7 +472,7 @@ class Handler(BaseHTTPRequestHandler):
             swin = max(0.04, _qf("swin", 0.32))
             srefr = max(0.0, _qf("srefr", 1.0))
             sguard = max(0.0, _qf("sguard", 100.0))
-            speak_raw = qs.get("speak", ["60"])[0]
+            speak_raw = qs.get("speak", ["mean"])[0]
             speak = "mean" if speak_raw == "mean" else max(0.0, _qf("speak", 60.0))
             baseline = qs.get("baseline", ["zero"])[0]
             wf = load_waveform(self.data_dir / fname)
@@ -481,7 +481,11 @@ class Handler(BaseHTTPRequestHandler):
                 base_val = estimate_baseline(wf["flow"].to_numpy())
             elif baseline == "slope":
                 base_arg = "slope"
-                base_val = estimate_baseline(wf["flow"].to_numpy())
+                base_val = slope_baseline(wf["flow"].to_numpy(),
+                                          slope_window_sec=swin, slope_delta=sdelta,
+                                          slope_refractory_sec=srefr,
+                                          slope_exp_guard=sguard,
+                                          slope_peak_min=speak)
             elif baseline == "zero":
                 base_arg, base_val = "zero", 0.0
             else:  # numeric manual offset; bad input -> zero

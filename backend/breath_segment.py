@@ -43,6 +43,30 @@ def estimate_baseline(flow: np.ndarray, q: float = 5.0) -> float:
     return float(np.percentile(flow, q))
 
 
+def estimate_baseline_from_onsets(
+    flow: np.ndarray, onsets: np.ndarray, window: int
+) -> float:
+    """Estimate the zero baseline from slope-detected inspiration onsets.
+
+    Each onset marks the start of an inspiratory rise, so the samples just before
+    it sit at the end-expiratory baseline (the flat pause). Pooling the `window`
+    pre-onset samples of every breath and taking their median gives a robust
+    baseline anchored to real breath starts, rather than the global low-percentile
+    guess in `estimate_baseline`. Falls back to the percentile estimate when no
+    onsets are available (it cannot produce a level until at least one breath is
+    detected). `window` is in samples.
+
+    NOTE: this baseline reflects residual end-expiratory flow, so it must not be
+    reused to screen for auto-PEEP (air trapping) — that would zero out the very
+    signal auto-PEEP produces. Use an independent baseline for that.
+    """
+    pre = [flow[max(0, i - window):i] for i in onsets]
+    pre = [p for p in pre if len(p)]
+    if not pre:
+        return estimate_baseline(flow)
+    return float(np.median(np.concatenate(pre)))
+
+
 def _detect_crossings(
     flow: np.ndarray,
     baseline: float = 0.0,
@@ -153,6 +177,43 @@ def _detect_slope_onsets(
     return np.array(onsets, dtype=int)
 
 
+def slope_onsets(
+    flow: np.ndarray,
+    slope_window_sec: float = 0.32,
+    slope_delta: float = 100.0,
+    slope_refractory_sec: float = 1.0,
+    slope_exp_guard: float = 100.0,
+    slope_peak_min: float | str = 60.0,
+) -> tuple[np.ndarray, int]:
+    """Detect slope-mode inspiration onsets from the seconds-based parameters.
+
+    Shared by `segment_capture` and callers that need the onsets/baseline without
+    running the full segmentation. Returns (onset indices, trend window samples).
+    """
+    window = max(1, int(round(slope_window_sec * SAMPLE_RATE_HZ)))
+    refractory = max(1, int(round(slope_refractory_sec * SAMPLE_RATE_HZ)))
+    peak_min = (float(np.mean(flow)) if slope_peak_min == "mean"
+                else float(slope_peak_min))
+    onsets = _detect_slope_onsets(flow, window, slope_delta, refractory,
+                                  slope_exp_guard, peak_min)
+    return onsets, window
+
+
+def slope_baseline(
+    flow: np.ndarray,
+    slope_window_sec: float = 0.32,
+    slope_delta: float = 100.0,
+    slope_refractory_sec: float = 1.0,
+    slope_exp_guard: float = 100.0,
+    slope_peak_min: float | str = 60.0,
+) -> float:
+    """Zero baseline for slope mode, derived from the detected onsets."""
+    onsets, window = slope_onsets(flow, slope_window_sec, slope_delta,
+                                  slope_refractory_sec, slope_exp_guard,
+                                  slope_peak_min)
+    return estimate_baseline_from_onsets(flow, onsets, window)
+
+
 def segment_capture(
     wf: pd.DataFrame,
     patient_id: str = "",
@@ -202,13 +263,12 @@ def segment_capture(
     n = len(flow)
 
     if slope_mode:
-        window = max(1, int(round(slope_window_sec * SAMPLE_RATE_HZ)))
-        refractory = max(1, int(round(slope_refractory_sec * SAMPLE_RATE_HZ)))
-        # "mean" -> use the whole-capture average flow as the peak-flow threshold
-        peak_min = (float(np.mean(flow)) if slope_peak_min == "mean"
-                    else float(slope_peak_min))
-        rising = _detect_slope_onsets(flow, window, slope_delta, refractory,
-                                      slope_exp_guard, peak_min)
+        rising, window = slope_onsets(flow, slope_window_sec, slope_delta,
+                                      slope_refractory_sec, slope_exp_guard,
+                                      slope_peak_min)
+        # derive the zero baseline from the detected onsets rather than the global
+        # low-percentile guess; the expiration-onset crossing keys off it
+        base = estimate_baseline_from_onsets(flow, rising, window)
         _, falling = _detect_crossings(flow, base, hysteresis)
     else:
         rising, falling = _detect_crossings(flow, base, hysteresis, slope_threshold)
