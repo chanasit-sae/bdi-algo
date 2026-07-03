@@ -93,7 +93,7 @@ frontend/
   src/
     routes.jsx         # <-- register pages here (nav + router are generated)
     App.jsx            # app shell / nav
-    pages/             # one file per page (ViewerPage, DoubleTriggerPage, AboutPage, …)
+    pages/             # one file per page (ViewerPage, NotificationsPage, AboutPage, …)
     components/        # ControlsBar, WaveformChart, CaptureSelect, panels, …
     lib/api.js         # fetch helpers for /api
     lib/charts.js      # canvas waveform renderer (+ event-highlight bands)

@@ -17,4 +17,5 @@ export const api = {
   waveform: (file) => getJSON("/waveform", { file }),
   breaths: (file, opts) => getJSON("/breaths", { file, ...opts }),
   doubleTriggers: (file, opts) => getJSON("/double-triggers", { file, ...opts }),
+  notifications: (opts) => getJSON("/notifications", opts),
 };

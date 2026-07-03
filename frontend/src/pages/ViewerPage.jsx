@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../lib/api.js";
 import { COLORS } from "../lib/charts.js";
 import { usePatientCapture } from "../lib/usePatientCapture.js";
-import { DEFAULT_SEGMENTATION_PARAMS, segmentationQuery } from "../lib/segmentation.js";
+import { DEFAULT_SEGMENTATION_PARAMS, segmentationQuery, paramsFromSearchParams } from "../lib/segmentation.js";
 import CaptureSelect from "../components/CaptureSelect.jsx";
 import ControlsBar from "../components/ControlsBar.jsx";
 import WaveformChart from "../components/WaveformChart.jsx";
@@ -10,13 +11,24 @@ import MetadataPanel from "../components/MetadataPanel.jsx";
 import BreathPanel from "../components/BreathPanel.jsx";
 
 export default function ViewerPage() {
+  const [searchParams] = useSearchParams();
   const [patients, setPatients] = useState(null);
-  const [params, setParams] = useState(DEFAULT_SEGMENTATION_PARAMS);
+  const [params, setParams] = useState(() => paramsFromSearchParams(searchParams) || DEFAULT_SEGMENTATION_PARAMS);
   const [breathIdx, setBreathIdx] = useState(-1);
   const [wf, setWf] = useState(null);
   const [breaths, setBreaths] = useState([]);
   const [baselineVal, setBaselineVal] = useState(null);
   const [status, setStatus] = useState("");
+
+  // A deep link from the Notifications page (?file=&breath=&hl0=&hl1=&...) —
+  // applied once below, then left alone so normal interaction isn't fought.
+  const [urlHighlights] = useState(() => {
+    const t0 = searchParams.get("hl0");
+    const t1 = searchParams.get("hl1");
+    return t0 != null && t1 != null ? [{ t0: Number(t0), t1: Number(t1), active: true }] : [];
+  });
+  const appliedUrlCapture = useRef(false);
+  const appliedUrlBreath = useRef(false);
 
   const set = (k, v) => setParams((p) => ({ ...p, [k]: v }));
 
@@ -29,6 +41,20 @@ export default function ViewerPage() {
 
   const { visiblePatients, patientId, setPatientId, patient, caps, file, setFile, capture } =
     usePatientCapture(patients, params.showDisc);
+
+  // deep link: once patients load, jump straight to the notification's capture
+  useEffect(() => {
+    if (appliedUrlCapture.current) return;
+    const targetFile = searchParams.get("file");
+    if (!patients || !targetFile) return;
+    const owner = patients.find((p) => p.captures.some((c) => c.raw_data === targetFile));
+    if (owner) {
+      setPatientId(owner.patient_id);
+      setFile(targetFile);
+    }
+    appliedUrlCapture.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patients]);
 
   // --- fetch the raw waveform when the capture changes ---
   useEffect(() => {
@@ -70,6 +96,17 @@ export default function ViewerPage() {
       cancelled = true;
     };
   }, [file, breathsOpts]);
+
+  // deep link: once this capture's breaths are in, select the flagged one
+  useEffect(() => {
+    if (appliedUrlBreath.current) return;
+    const targetBreath = searchParams.get("breath");
+    if (targetBreath == null || !breaths.length) return;
+    const idx = breaths.findIndex((b) => String(b.breath_idx) === targetBreath);
+    if (idx >= 0) setBreathIdx(idx);
+    appliedUrlBreath.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [breaths]);
 
   // status line once the waveform is in
   useEffect(() => {
@@ -127,6 +164,7 @@ export default function ViewerPage() {
             breaths={breaths}
             sel={sel}
             baseVal={baselineVal}
+            highlights={urlHighlights}
           />
           <WaveformChart
             title="Pressure (cmH2O)"
@@ -135,6 +173,7 @@ export default function ViewerPage() {
             y={wf?.pressure}
             breaths={breaths}
             sel={sel}
+            highlights={urlHighlights}
           />
           <WaveformChart
             title="Volume (mL)"
@@ -143,6 +182,7 @@ export default function ViewerPage() {
             y={wf?.volume}
             breaths={breaths}
             sel={sel}
+            highlights={urlHighlights}
           />
           <WaveformChart
             title="Flow slope (L/min/s)"
@@ -152,6 +192,7 @@ export default function ViewerPage() {
             breaths={breaths}
             sel={sel}
             baseVal={slopeRef || null}
+            highlights={urlHighlights}
           />
         </div>
         <aside>

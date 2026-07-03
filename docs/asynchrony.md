@@ -1,8 +1,11 @@
 # Double-Triggering Asynchrony Detection
 
 **Module:** `backend/asynchrony.py` · **Deps:** pandas (reuses `breath_segment.py` output)
-**API:** `GET /api/double-triggers` (`backend/server/routers/asynchrony.py`)
-**Page:** Double Trigger (`frontend/src/pages/DoubleTriggerPage.jsx`)
+**API:** `GET /api/double-triggers` (single capture) and `GET /api/notifications` (scans the
+dataset) — both in `backend/server/routers/asynchrony.py`
+**Page:** Notifications (`frontend/src/pages/NotificationsPage.jsx`) — lists every flagged
+event across the dataset; clicking one deep-links to the Viewer with the same
+segmentation reproduced and the flagged breaths highlighted.
 
 ## What it detects
 **Double triggering**: the patient's neural inspiratory effort continues past
@@ -85,6 +88,47 @@ directly from the chosen breath boundaries). Response:
   "formula": { "criterion": "te_gap < ratio * ti_ref", "ratio": 0.5, ... }
 }
 ```
+
+## Notifications: scanning the whole dataset
+
+```
+GET /api/notifications
+    &baseline=zero|auto|slope|<num>&hysteresis=&slope=&sdelta=&swin=&srefr=&sguard=&speak=
+    &ratio=0.5&ti_ref=pair|capture|self&require_stacking=false&stack_ratio=1.5
+    &patient_id=<optional, restrict to one patient>
+    &include_disconnected=false  # captures flagged disconnected (flat flow) can't produce
+                                  # real events, so they're skipped by default for speed
+```
+Loops every capture (or one patient's), runs the same segmentation + detector as
+`/api/double-triggers`, and flattens all flagged pairs into one list. Each
+notification carries a `type` (only `"double_trigger"` exists today — new
+asynchrony types can be added here without changing the response shape) and
+echoes the exact `segmentation` params used, so a client can reproduce the
+identical breath boundaries elsewhere:
+```json
+{
+  "notifications": [ { "type": "double_trigger", "patient_id": "...", "raw_data": "....csv",
+                        "day": 4, "time": "10:23:36", "breath_idx_a": 0, "breath_idx_b": 1,
+                        "t_insp_start_a": 0.56, "t_exp_end_b": 6.0, "te_gap": 0.28,
+                        "ti_ref": 2.44, "te_ti_ratio": 0.115, "vt_pair": 936.2,
+                        "vt_ratio": 1.0, "stacked": false,
+                        "segmentation": { "baseline": "zero", "hysteresis": 5.0, ... } } ],
+  "scanned_captures": 40,
+  "formula": { "criterion": "te_gap < ratio * ti_ref", "ratio": 0.5, ... }
+}
+```
+
+The Notifications page (`frontend/src/pages/NotificationsPage.jsx`) renders
+this list; clicking a notification builds a Viewer deep link:
+```
+/?file=<raw_data>&breath=<breath_idx_a>&<...segmentation>&hl0=<t_insp_start_a>&hl1=<t_exp_end_b>
+```
+The Viewer (`ViewerPage.jsx`) reads this once on mount: selects the owning
+patient/capture, applies the same segmentation (so the breath list matches
+exactly), selects `breath_idx_a` in the breath dropdown, and shades
+`[hl0, hl1]` on every chart as a highlight band — the same visual the
+Notifications/Double-trigger detail view uses — so the flagged pair is visible
+regardless of which single breath happens to be selected.
 
 ## CLI
 ```bash
