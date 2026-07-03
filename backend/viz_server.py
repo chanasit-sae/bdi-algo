@@ -137,6 +137,9 @@ INDEX_HTML = r"""<!doctype html>
   <div><label title="dead-band around baseline (L/min) to reject noise crossings">Hysteresis</label>
     <input id="hyst" type="number" value="0" min="0" step="1" style="width:64px;
       background:#0b1119;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px"></div>
+  <div><label title="min flow rise rate (L/min per second) at inspiration onset; both this and hysteresis must be met to mark a breath. ~30 recommended">Slope</label>
+    <input id="slope" type="number" value="30" min="0" step="1" style="width:64px;
+      background:#0b1119;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px"></div>
   <div><label title="also list flat captures where the ventilator is not connected to a patient">Show disconnected</label>
     <input id="showDisc" type="checkbox"></div>
   <span class="muted" id="status"></span>
@@ -224,13 +227,14 @@ function renderCharts(sel){
 async function selectCapture(file){
   document.getElementById('status').textContent = 'loading '+file+' ...';
   const hyst = parseFloat(document.getElementById('hyst').value) || 0;
+  const slope = parseFloat(document.getElementById('slope').value) || 0;
   const mode = document.getElementById('baseline').value;
   const baseline = (mode === 'manual')
     ? (parseFloat(document.getElementById('baseoff').value) || 0)
     : mode;
   const [wf, br] = await Promise.all([
     j('/api/waveform?file='+encodeURIComponent(file)),
-    j('/api/breaths?file='+encodeURIComponent(file)+'&hysteresis='+hyst+'&baseline='+baseline),
+    j('/api/breaths?file='+encodeURIComponent(file)+'&hysteresis='+hyst+'&baseline='+baseline+'&slope='+slope),
   ]);
   CUR = { file, wf, breaths: br.breaths, baseline: br.baseline };
   const n = wf.t_sec.length, dur = wf.t_sec[n-1] || 0;
@@ -333,6 +337,7 @@ async function init(){
   document.getElementById('capture').onchange = e => selectCapture(e.target.value);
   document.getElementById('breath').onchange = onBreathChange;
   document.getElementById('hyst').onchange = () => { if(CUR.file) selectCapture(CUR.file); };
+  document.getElementById('slope').onchange = () => { if(CUR.file) selectCapture(CUR.file); };
   document.getElementById('baseline').onchange = () => { syncBaselineUI(); if(CUR.file) selectCapture(CUR.file); };
   document.getElementById('baseoff').oninput = () => { if(CUR.file) selectCapture(CUR.file); };
   syncBaselineUI();
@@ -397,6 +402,10 @@ class Handler(BaseHTTPRequestHandler):
                 hyst = max(0.0, float(qs.get("hysteresis", ["0"])[0]))
             except ValueError:
                 hyst = 0.0
+            try:
+                slope = max(0.0, float(qs.get("slope", ["0"])[0]))
+            except ValueError:
+                slope = 0.0
             baseline = qs.get("baseline", ["zero"])[0]
             wf = load_waveform(self.data_dir / fname)
             if baseline == "auto":
@@ -410,7 +419,8 @@ class Handler(BaseHTTPRequestHandler):
                     base_arg = base_val
                 except ValueError:
                     base_arg, base_val = "zero", 0.0
-            breaths = segment_capture(wf, raw_data=fname, baseline=base_arg, hysteresis=hyst)
+            breaths = segment_capture(wf, raw_data=fname, baseline=base_arg,
+                                      hysteresis=hyst, slope_threshold=slope)
             self._json({"breaths": breaths.to_dict(orient="records"), "baseline": base_val})
         else:
             self._json({"error": "not found"}, 404)

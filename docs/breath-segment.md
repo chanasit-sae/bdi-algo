@@ -13,14 +13,38 @@ insp_start ──inspiration──> insp_end(=exp_start) ──expiration──>
   Flow ↑                        Flow ↓                              Flow ↑
 ```
 Detection is a hysteresis state machine (`_detect_crossings`):
-- **Inspiration onset** (breath boundary): flow rises above `baseline + hysteresis`.
+- **Inspiration onset** (breath boundary): flow rises above `baseline + hysteresis`
+  **and** the local rise rate has reached `slope_threshold`. Both conditions must
+  hold at the same sample, so the onset lands where flow is genuinely accelerating
+  upward, not merely drifting across the band.
 - **Expiration onset** (end of inspiration): flow drops below `baseline − hysteresis`.
 - A breath spans consecutive inspiration onsets. The trailing segment after the
   last onset runs to end-of-capture and is flagged `is_complete=False`.
 - A crossing index `i` is the first sample of the new phase.
 
-With `baseline="zero"` and `hysteresis=0` (the defaults) this reduces to pure
-zero-crossing.
+With `baseline="zero"`, `hysteresis=0` and `slope_threshold=0` (the defaults) this
+reduces to pure zero-crossing.
+
+### Slope gate
+`slope_threshold` (L/min **per second**) requires the flow to be rising fast enough
+at the onset, as a second condition alongside the band. The slope is a centered
+derivative, `np.gradient(flow) * SAMPLE_RATE_HZ`.
+
+- **Why 30 L/min/s (recommended).** Flow-trigger literature (ventilator patents)
+  fires inspiration on a flow change of ~6–10 L/min, which over a ~0.2–0.3 s trigger
+  window is ~20–50 L/min/s. On this sample, true inspiratory onsets have a rise rate
+  of ~105 L/min/s (median, p25 ~69) at the crossing, while flat/noise captures sit
+  around ~9 L/min/s. A threshold of **30** keeps ~88% of real onsets and clears the
+  noise floor by a wide margin. It is a no-op on the clean zero-baseline breaths here
+  (91 breaths at both 0 and 30), i.e. non-destructive.
+- **What it fixes.** The gate rejects slow baseline drift that clears the band without
+  a real breath. This matters most with `auto`/`patient` baselines, whose crossings
+  sit near the expiratory trough: `auto` alone over-segments to **748 breaths / 68
+  captures**, and `auto` + `slope_threshold=30` collapses that to **120 / 39** — the
+  same noise-rejection job as a hysteresis band, but on rise-rate instead of amplitude.
+- A spike-only slope (some flat captures spike to ~800 L/min/s) does **not** create a
+  breath, because it must also coincide with an upward band crossing — that is the
+  reason both conditions are required.
 
 ### Baseline & hysteresis
 Real flow may not return exactly to zero at the inspiration→expiration transition
@@ -57,13 +81,14 @@ Real flow may not return exactly to zero at the inspiration→expiration transit
 ## Public API
 | Function | Purpose |
 |----------|---------|
-| `segment_capture(wf, patient_id, raw_data, min_breath_sec=0.0, baseline="zero", hysteresis=0.0)` | Segment one `load_waveform` DataFrame → breath table |
-| `segment_dataset(data_dir, min_breath_sec=0.0, baseline="zero", hysteresis=0.0)` | Segment every referenced capture → one combined table |
+| `segment_capture(wf, patient_id, raw_data, min_breath_sec=0.0, baseline="zero", hysteresis=0.0, slope_threshold=0.0)` | Segment one `load_waveform` DataFrame → breath table |
+| `segment_dataset(data_dir, min_breath_sec=0.0, baseline="zero", hysteresis=0.0, slope_threshold=0.0)` | Segment every referenced capture → one combined table |
 | `estimate_baseline(flow, q=5.0)` | Low-percentile (end-expiratory) baseline estimate |
 | `save_breaths(df, path)` | Persist the breath table (Parquet or CSV by extension) |
 
 `min_breath_sec` drops breaths shorter than the threshold. `baseline` / `hysteresis`
-control crossing detection (see below); defaults reproduce pure zero-crossing.
+/ `slope_threshold` control crossing detection (see below); defaults reproduce pure
+zero-crossing.
 
 ## Persistence
 `save_breaths(df, path)` writes the table, choosing format by extension:
@@ -91,9 +116,9 @@ The CLI saves automatically. Default output: **`backend/output/breaths.csv`**
 ## Usage
 ```bash
 python3 backend/breath_segment.py [data_dir] [--out FILE] [--min-breath-sec N] \
-    [--baseline zero|auto|<num>] [--hysteresis L/min]
+    [--baseline zero|auto|<num>] [--hysteresis L/min] [--slope-threshold L/min-per-s]
 # default: reads ../smart_icu_data, writes backend/output/breaths.csv (pure zero-crossing)
-# recommended for noisy flow: --hysteresis 5
+# recommended for noisy flow: --hysteresis 5 --slope-threshold 30
 ```
 ```python
 from breath_segment import segment_dataset, segment_capture, save_breaths

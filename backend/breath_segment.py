@@ -44,24 +44,36 @@ def estimate_baseline(flow: np.ndarray, q: float = 5.0) -> float:
 
 
 def _detect_crossings(
-    flow: np.ndarray, baseline: float = 0.0, hysteresis: float = 0.0
+    flow: np.ndarray,
+    baseline: float = 0.0,
+    hysteresis: float = 0.0,
+    slope_threshold: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return (rising, falling) sample indices via a hysteresis state machine.
 
-    Inspiration is entered when flow rises above `baseline + hysteresis`;
-    expiration when it drops below `baseline - hysteresis`. The band rejects
-    noise-driven false crossings near the baseline. A crossing index i is the
-    first sample of the new phase.
+    Inspiration is entered when flow rises above `baseline + hysteresis` **and**
+    the local rise rate has reached `slope_threshold`; expiration when flow drops
+    below `baseline - hysteresis`. The band rejects noise-driven false crossings
+    near the baseline; the slope gate rejects slow baseline drift that clears the
+    band without a real inspiratory effort. A crossing index i is the first
+    sample of the new phase.
 
-    With baseline=0 and hysteresis=0 this reproduces pure zero-crossing.
+    slope_threshold is in flow units per second (L/min per second). The slope is
+    a centered derivative `np.gradient(flow) * SAMPLE_RATE_HZ`. Both the band and
+    the slope condition must hold at the same sample for a rising crossing to be
+    marked, so the onset lands where flow is genuinely accelerating upward.
+
+    With baseline=0, hysteresis=0 and slope_threshold=0 this reproduces pure
+    zero-crossing.
     """
     upper = baseline + hysteresis
     lower = baseline - hysteresis
+    slope = np.gradient(flow) * SAMPLE_RATE_HZ
     rising: list[int] = []
     falling: list[int] = []
     state = "insp" if flow[0] > baseline else "exp"
     for i in range(1, len(flow)):
-        if state == "exp" and flow[i] > upper:
+        if state == "exp" and flow[i] > upper and slope[i] >= slope_threshold:
             rising.append(i)
             state = "insp"
         elif state == "insp" and flow[i] <= lower:
@@ -77,12 +89,16 @@ def segment_capture(
     min_breath_sec: float = 0.0,
     baseline: str | float = "zero",
     hysteresis: float = 0.0,
+    slope_threshold: float = 0.0,
 ) -> pd.DataFrame:
     """Segment one waveform DataFrame (from load_waveform) into breaths.
 
     min_breath_sec: drop breaths shorter than this (0 = no filter).
     baseline: "zero" (literal 0), "auto" (low-percentile offset), or a numeric offset.
     hysteresis: dead-band (L/min) around the baseline to reject noise crossings.
+    slope_threshold: min rise rate (L/min per second) at the inspiration onset;
+        both this and the hysteresis band must be met to mark a breath boundary
+        (0 = no slope gate).
     """
     flow = wf["flow"].to_numpy()
     if baseline in ("auto", "patient"):
@@ -97,7 +113,7 @@ def segment_capture(
     volume = wf["volume"].to_numpy()
     n = len(flow)
 
-    rising, falling = _detect_crossings(flow, base, hysteresis)
+    rising, falling = _detect_crossings(flow, base, hysteresis, slope_threshold)
     rows = []
     min_len = int(round(min_breath_sec * SAMPLE_RATE_HZ))
 
@@ -151,6 +167,7 @@ def segment_dataset(
     min_breath_sec: float = 0.0,
     baseline: str | float = "zero",
     hysteresis: float = 0.0,
+    slope_threshold: float = 0.0,
 ) -> pd.DataFrame:
     """Segment every capture referenced in a data directory into one breath table.
 
@@ -176,7 +193,7 @@ def segment_dataset(
     frames = []
     for pid, raw, wf in loaded:
         base = patient_base[pid] if baseline == "patient" else baseline
-        frames.append(segment_capture(wf, pid, raw, min_breath_sec, base, hysteresis))
+        frames.append(segment_capture(wf, pid, raw, min_breath_sec, base, hysteresis, slope_threshold))
     if not frames:
         return pd.DataFrame(columns=BREATH_COLUMNS)
     out = pd.concat(frames, ignore_index=True)
@@ -216,13 +233,18 @@ if __name__ == "__main__":
                          'pair auto/patient with --hysteresis')
     ap.add_argument("--hysteresis", type=float, default=0.0,
                     help="dead-band (L/min) around baseline to reject noise crossings")
+    ap.add_argument("--slope-threshold", type=float, default=0.0,
+                    help="min rise rate (L/min per second) at inspiration onset; "
+                         "both this and the hysteresis band must be met to mark a "
+                         "breath (0 = off; recommended ~30)")
     args = ap.parse_args()
 
     baseline = args.baseline
     if baseline not in ("zero", "auto", "patient"):
         baseline = float(baseline)
     breaths = segment_dataset(args.data_dir, min_breath_sec=args.min_breath_sec,
-                              baseline=baseline, hysteresis=args.hysteresis)
+                              baseline=baseline, hysteresis=args.hysteresis,
+                              slope_threshold=args.slope_threshold)
     n_partial = int((~breaths["is_complete"]).sum())
     print(f"segmented {breaths['raw_data'].nunique()} captures "
           f"into {len(breaths)} breaths "
