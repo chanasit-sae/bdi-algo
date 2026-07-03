@@ -17,7 +17,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
-from parser import load_dataset, metadata_frame, load_waveform
+import numpy as np
+
+from parser import load_dataset, metadata_frame, load_waveform, SAMPLE_RATE_HZ
 from breath_segment import segment_capture, estimate_baseline
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -100,7 +102,7 @@ INDEX_HTML = r"""<!doctype html>
 <title>Ventilator Waveform Viewer</title>
 <style>
   :root { --bg:#0f1720; --panel:#16212e; --fg:#dbe4ee; --muted:#8ea1b5;
-          --flow:#4fc3f7; --press:#ff8a65; --vol:#81c784; --line:#2b3a4a; }
+          --flow:#4fc3f7; --press:#ff8a65; --vol:#81c784; --slope:#ba68c8; --line:#2b3a4a; }
   * { box-sizing: border-box; }
   body { margin:0; font:14px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--fg); }
   header { padding:12px 18px; background:var(--panel); border-bottom:1px solid var(--line);
@@ -149,6 +151,7 @@ INDEX_HTML = r"""<!doctype html>
     <div class="chart-card"><h3><span class="swatch" style="background:var(--flow)"></span>Flow (L/min)</h3><canvas id="c-flow"></canvas></div>
     <div class="chart-card"><h3><span class="swatch" style="background:var(--press)"></span>Pressure (cmH2O)</h3><canvas id="c-pressure"></canvas></div>
     <div class="chart-card"><h3><span class="swatch" style="background:var(--vol)"></span>Volume (mL)</h3><canvas id="c-volume"></canvas></div>
+    <div class="chart-card"><h3><span class="swatch" style="background:var(--slope)"></span>Flow slope (L/min/s)</h3><canvas id="c-slope"></canvas></div>
   </div>
   <aside>
     <h2>Metadata</h2>
@@ -158,7 +161,7 @@ INDEX_HTML = r"""<!doctype html>
   </aside>
 </main>
 <script>
-const COLORS = { flow:'#4fc3f7', pressure:'#ff8a65', volume:'#81c784' };
+const COLORS = { flow:'#4fc3f7', pressure:'#ff8a65', volume:'#81c784', slope:'#ba68c8' };
 const INSP_FILL = 'rgba(79,195,247,0.13)';   // inspiration band
 const EXP_FILL  = 'rgba(255,138,101,0.13)';  // expiration band
 let INDEX = null;
@@ -222,6 +225,8 @@ function renderCharts(sel){
   drawChart('c-flow', wf.t_sec, wf.flow, COLORS.flow, CUR.breaths, sel, CUR.baseline);
   drawChart('c-pressure', wf.t_sec, wf.pressure, COLORS.pressure, CUR.breaths, sel, null);
   drawChart('c-volume', wf.t_sec, wf.volume, COLORS.volume, CUR.breaths, sel, null);
+  const slopeThr = parseFloat(document.getElementById('slope').value) || 0;
+  drawChart('c-slope', wf.t_sec, wf.slope, COLORS.slope, CUR.breaths, sel, slopeThr || null);
 }
 
 async function selectCapture(file){
@@ -385,12 +390,14 @@ class Handler(BaseHTTPRequestHandler):
             if fname not in self.index["valid"]:  # guard against path traversal
                 return self._json({"error": "unknown file"}, 404)
             wf = load_waveform(self.data_dir / fname)
+            slope = np.gradient(wf["flow"].to_numpy()) * SAMPLE_RATE_HZ
             self._json(
                 {
                     "t_sec": wf["t_sec"].round(3).tolist(),
                     "flow": wf["flow"].tolist(),
                     "pressure": wf["pressure"].tolist(),
                     "volume": wf["volume"].tolist(),
+                    "slope": np.round(slope, 1).tolist(),
                 }
             )
         elif url.path == "/api/breaths":
