@@ -22,10 +22,17 @@ export default function ViewerPage() {
 
   // A deep link from the Notifications page (?file=&breath=&hl0=&hl1=&...) —
   // applied once below, then left alone so normal interaction isn't fought.
-  const [urlHighlights] = useState(() => {
+  // The span is in seconds *of that specific capture*, so it must only be
+  // shown while that same capture is still loaded — otherwise switching
+  // patient/capture would leave a stale red band drawn over an unrelated
+  // waveform at whatever seconds happened to match.
+  const [urlHighlight] = useState(() => {
     const t0 = searchParams.get("hl0");
     const t1 = searchParams.get("hl1");
-    return t0 != null && t1 != null ? [{ t0: Number(t0), t1: Number(t1), active: true }] : [];
+    const hlFile = searchParams.get("file");
+    return t0 != null && t1 != null && hlFile
+      ? { t0: Number(t0), t1: Number(t1), file: hlFile }
+      : null;
   });
   const appliedUrlCapture = useRef(false);
   const appliedUrlBreath = useRef(false);
@@ -116,6 +123,12 @@ export default function ViewerPage() {
     setStatus(`${n} samples · ${dur.toFixed(1)}s @ 25Hz · ${breaths.length} breaths`);
   }, [wf, breaths]);
 
+  // only draw the deep-link highlight while its own capture is still loaded
+  const highlights = useMemo(
+    () => (urlHighlight && urlHighlight.file === file ? [{ ...urlHighlight, active: true }] : []),
+    [urlHighlight, file]
+  );
+
   const sel = breathIdx >= 0 ? breaths[breathIdx] : null;
   const slopeRef =
     params.baselineMode === "slope"
@@ -164,7 +177,7 @@ export default function ViewerPage() {
             breaths={breaths}
             sel={sel}
             baseVal={baselineVal}
-            highlights={urlHighlights}
+            highlights={highlights}
           />
           <WaveformChart
             title="Pressure (cmH2O)"
@@ -173,7 +186,7 @@ export default function ViewerPage() {
             y={wf?.pressure}
             breaths={breaths}
             sel={sel}
-            highlights={urlHighlights}
+            highlights={highlights}
           />
           <WaveformChart
             title="Volume (mL)"
@@ -182,7 +195,7 @@ export default function ViewerPage() {
             y={wf?.volume}
             breaths={breaths}
             sel={sel}
-            highlights={urlHighlights}
+            highlights={highlights}
           />
           <WaveformChart
             title="Flow slope (L/min/s)"
@@ -192,7 +205,7 @@ export default function ViewerPage() {
             breaths={breaths}
             sel={sel}
             baseVal={slopeRef || null}
-            highlights={urlHighlights}
+            highlights={highlights}
           />
         </div>
         <aside>
