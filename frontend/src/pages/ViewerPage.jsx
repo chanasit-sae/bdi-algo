@@ -7,26 +7,41 @@ import {
   DEFAULT_SEGMENTATION_PARAMS,
   segmentationQuery,
   paramsFromSearchParams,
-  DEFAULT_ASYNCHRONY_PARAMS,
-  asynchronyQuery,
-  asynchronyParamsFromSearchParams,
+  DEFAULT_DT_PARAMS,
+  dtQuery,
+  dtParamsFromSearchParams,
+  DEFAULT_IE_PARAMS,
+  ieQuery,
+  ieParamsFromSearchParams,
+  DEFAULT_AP_PARAMS,
+  apQuery,
+  apParamsFromSearchParams,
 } from "../lib/segmentation.js";
 import CaptureSelect from "../components/CaptureSelect.jsx";
 import ControlsBar from "../components/ControlsBar.jsx";
 import DoubleTriggerControls from "../components/DoubleTriggerControls.jsx";
+import IneffectiveEffortControls from "../components/IneffectiveEffortControls.jsx";
+import AutoPeepControls from "../components/AutoPeepControls.jsx";
 import WaveformChart from "../components/WaveformChart.jsx";
 import MetadataPanel from "../components/MetadataPanel.jsx";
 import BreathPanel from "../components/BreathPanel.jsx";
 import AsynchronyPanel from "../components/AsynchronyPanel.jsx";
 
-const DEFAULT_PARAMS = { ...DEFAULT_SEGMENTATION_PARAMS, ...DEFAULT_ASYNCHRONY_PARAMS };
+const DEFAULT_PARAMS = {
+  ...DEFAULT_SEGMENTATION_PARAMS,
+  ...DEFAULT_DT_PARAMS,
+  ...DEFAULT_IE_PARAMS,
+  ...DEFAULT_AP_PARAMS,
+};
 
 export default function ViewerPage() {
   const [searchParams] = useSearchParams();
   const [patients, setPatients] = useState(null);
   const [params, setParams] = useState(() => ({
     ...(paramsFromSearchParams(searchParams) || DEFAULT_SEGMENTATION_PARAMS),
-    ...(asynchronyParamsFromSearchParams(searchParams) || DEFAULT_ASYNCHRONY_PARAMS),
+    ...(dtParamsFromSearchParams(searchParams) || DEFAULT_DT_PARAMS),
+    ...(ieParamsFromSearchParams(searchParams) || DEFAULT_IE_PARAMS),
+    ...(apParamsFromSearchParams(searchParams) || DEFAULT_AP_PARAMS),
   }));
   const [breathIdx, setBreathIdx] = useState(-1);
   const [wf, setWf] = useState(null);
@@ -118,8 +133,10 @@ export default function ViewerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [breaths]);
 
-  // --- fetch every asynchrony event for this capture (all of it, not just one) ---
-  const asyncOpts = useMemo(() => asynchronyQuery(params), [params]);
+  // --- fetch every asynchrony event for this capture, all detectors, all of it ---
+  const dtOpts = useMemo(() => dtQuery(params), [params]);
+  const ieOpts = useMemo(() => ieQuery(params), [params]);
+  const apOpts = useMemo(() => apQuery(params), [params]);
 
   useEffect(() => {
     if (!file) {
@@ -129,7 +146,7 @@ export default function ViewerPage() {
     }
     let cancelled = false;
     api
-      .doubleTriggers(file, { ...breathsOpts, ...asyncOpts })
+      .asynchrony(file, { ...breathsOpts, ...dtOpts, ...ieOpts, ...apOpts })
       .then((d) => {
         if (cancelled) return;
         setAsyncEvents(d.events);
@@ -139,7 +156,7 @@ export default function ViewerPage() {
     return () => {
       cancelled = true;
     };
-  }, [file, breathsOpts, asyncOpts]);
+  }, [file, breathsOpts, dtOpts, ieOpts, apOpts]);
 
   // deep link: once this capture's events are in, mark the flagged one active
   useEffect(() => {
@@ -174,8 +191,8 @@ export default function ViewerPage() {
   const highlights = useMemo(
     () =>
       asyncEvents.map((e, i) => ({
-        t0: e.t_insp_start_a,
-        t1: e.t_exp_end_b,
+        t0: e.t0,
+        t1: e.t1,
         active: i === activeEventIdx,
       })),
     [asyncEvents, activeEventIdx]
@@ -219,6 +236,8 @@ export default function ViewerPage() {
 
       <ControlsBar params={params} set={set} />
       <DoubleTriggerControls params={params} set={set} />
+      <IneffectiveEffortControls params={params} set={set} />
+      <AutoPeepControls params={params} set={set} />
 
       <main className="viewer">
         <div className="charts">

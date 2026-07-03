@@ -1,4 +1,11 @@
-const f = (v, d = 2) => (v == null ? "—" : (+v).toFixed(d));
+// Human label per event `type`. Add new asynchrony types here as the
+// backend gains new detectors — everything else (highlighting, this list)
+// already works off the generic t0/t1/detail fields.
+const TYPE_LABEL = {
+  double_trigger: "Double triggering",
+  ineffective_effort: "Ineffective effort",
+  auto_peep: "Auto-PEEP",
+};
 
 // List of flagged asynchrony events for the currently loaded capture. Clicking
 // one makes it "active" (bright band on the chart) and selects its first
@@ -17,10 +24,11 @@ export default function AsynchronyPanel({ events, activeIdx, onSelect }) {
             onClick={() => onSelect(i)}
           >
             <span className="asy-idx">
-              breaths {e.breath_idx_a} → {e.breath_idx_b}
+              {TYPE_LABEL[e.type] || e.type}
+              {e.breath_idx_a != null && ` · breath ${e.breath_idx_a}`}
+              {e.breath_idx_b != null && ` → ${e.breath_idx_b}`}
             </span>
-            <span className="asy-ratio">Te/Ti {f(e.te_ti_ratio)}</span>
-            {e.stacked && <span className="notif-badge">stacked</span>}
+            <span className="asy-ratio">{e.detail}</span>
           </button>
         </li>
       ))}

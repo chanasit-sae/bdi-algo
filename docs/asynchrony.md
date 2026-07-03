@@ -1,150 +1,265 @@
-# Double-Triggering Asynchrony Detection
+# Asynchrony Detection & Notifications
 
-**Module:** `backend/asynchrony.py` · **Deps:** pandas (reuses `breath_segment.py` output)
-**API:** `GET /api/double-triggers` (single capture) and `GET /api/notifications` (scans the
-dataset) — both in `backend/server/routers/asynchrony.py`
+**Modules:** `backend/asynchrony.py` (double-triggering), `backend/ineffective_effort.py`
+(ineffective effort), `backend/auto_peep.py` (auto-PEEP — full spec in
+[auto-peep.md](../auto-peep.md)) · **Deps:** numpy + pandas (reuse `breath_segment.py` output)
+**API:** `backend/server/routers/asynchrony.py` — `GET /api/asynchrony` (one capture,
+every detector), `GET /api/auto-peep` (one capture, auto-PEEP only), and
+`GET /api/notifications` (scans the dataset, paginated)
 **Pages:**
-- Notifications (`frontend/src/pages/NotificationsPage.jsx`) — lists every flagged
-  event across the whole dataset.
-- Viewer (`frontend/src/pages/ViewerPage.jsx`) — independently detects and highlights
-  **every** flagged event for whatever capture is currently loaded (its own
-  Ratio/Ti-ref/stacking controls, same as Notifications), listed in the aside and
-  shaded on every chart. Clicking a notification deep-links here with the same
-  segmentation *and* formula reproduced, so the same event is guaranteed to be
-  found again and marked active (brighter band).
+- **Notifications** (`frontend/src/pages/NotificationsPage.jsx`) — a plain, most-recent-first
+  list of every flagged event across the whole dataset, 10 per page, using fixed default
+  detection settings. No tunable controls here on purpose — click a notification to
+  inspect and tune it in the Viewer.
+- **Viewer** (`frontend/src/pages/ViewerPage.jsx`) — independently detects and highlights
+  **every** flagged event (all three types) for whatever capture is currently loaded, with
+  its own Baseline/DT-formula/IE-formula/AP-formula controls. Clicking a notification
+  deep-links here with the exact segmentation *and* every formula reproduced, so the same
+  event is guaranteed to be found again and marked active (brighter band).
 
-## What it detects
-**Double triggering**: the patient's neural inspiratory effort continues past
-the ventilator's inspiratory termination, so a second breath is triggered
-almost immediately after the first — an abnormally short expiratory pause
-between two consecutive breaths.
+Every event, regardless of which detector produced it, carries a `type` plus two
+generalized fields computed by the router: **`t0`/`t1`** (the span to highlight on a
+chart) and **`detail`** (a short human-readable summary). The frontend (highlighting,
+notification cards, the Viewer's asynchrony list) works entirely off these three fields
+and never branches on type-specific columns — adding a third detector later means adding
+it to `_scan_capture()` in the router; nothing else changes.
 
-## Formula
+---
+
+## 1. Double triggering
+
+The patient's neural inspiratory effort continues past the ventilator's inspiratory
+termination, so a second breath is triggered almost immediately after the first — an
+abnormally short expiratory pause between two consecutive breaths.
+
+### Formula
 ```
 Te(i) < ratio × Ti_ref
 ```
 per **Thille AW, Rodriguez P, Cabello B, Lellouche F, Brochard L. "Patient-ventilator
-asynchrony during assisted mechanical ventilation." *Intensive Care Med.*
-2006;32(10):1515–1522** — the standard clinical definition ("two consecutive
-cycles separated by a very short expiratory time, less than one half of the
-mean inspiratory time").
+asynchrony during assisted mechanical ventilation." *Intensive Care Med.* 2006;32(10):1515–1522**
+— the standard clinical definition ("two consecutive cycles separated by a very short
+expiratory time, less than one half of the mean inspiratory time").
 
 | term | meaning |
 |------|---------|
-| `Te(i)` | `te_sec` of breath *i* — the expiratory gap before breath *i+1* begins. `te_sec = t_exp_end − t_insp_end`, and `t_exp_end` **is** breath *i+1*'s `t_insp_start` (see [breath-segment.md](breath-segment.md)), so this is exactly the inter-breath gap — no separate computation needed. |
-| `ratio` | cutoff, default **0.5** ("less than one half"). |
-| `Ti_ref` | the inspiratory-time reference the short `Te` is judged against — configurable via `ti_ref`. |
+| `Te(i)` | `te_sec` of breath *i* — the expiratory gap before breath *i+1* begins. `te_sec = t_exp_end − t_insp_end`, and `t_exp_end` **is** breath *i+1*'s `t_insp_start` (see [breath-segment.md](breath-segment.md)), so this is exactly the inter-breath gap. |
+| `ratio` | cutoff, default **0.5**. |
+| `Ti_ref` | the inspiratory-time reference the short `Te` is judged against — `ti_ref="pair"` (default, mean of the pair's own Ti), `"capture"` (mean over the capture's complete breaths), or `"self"` (Ti(i) alone). |
 
-`ti_ref` modes:
-- **`"pair"`** (default) — `mean(Ti(i), Ti(i+1))`: the pair's own average Ti.
-  Robust to one noisy breath, adapts across a drifting session, no
-  whole-capture baseline needed.
-- **`"capture"`** — mean Ti over the capture's complete breaths. Closest to
-  Thille's original "mean Ti of the recording".
-- **`"self"`** — `Ti(i)` alone: the simplest, purely local comparison.
+**Optional secondary check — volume stacking.** Double-triggered breaths typically
+deliver close to double the tidal volume of a normal breath pair — the actual clinical
+harm (volutrauma risk; **Pohlman MC et al., Crit Care Med. 2008;36(11):3019–23**).
+`require_stacking=true` additionally requires `Vt(i)+Vt(i+1) > stack_ratio × 2 × median(Vt)`
+(default `stack_ratio=1.5`). Off by default so the detector matches the plain Thille
+timing definition; `vt_ratio` is always reported so it can be reviewed either way.
 
-## Optional secondary check — volume stacking
-Double-triggered breaths typically deliver close to double the tidal volume
-of a normal breath pair — the actual clinical harm (volutrauma risk; **Pohlman
-MC et al. "Excessive tidal volume from breath stacking during
-lung-protective ventilation for acute lung injury." *Crit Care Med.*
-2008;36(11):3019–23**).
+**Edge case.** A capture's last breath has no successor, so its `te_sec` is an artifact
+of where the recording was cut off, not a real gap (`is_complete=False`). The pair loop
+never uses it as the *first* breath of a pair, so it can't produce a false positive.
 
-`require_stacking=true` additionally requires
-```
-Vt(i) + Vt(i+1)  >  stack_ratio × 2 × median(Vt)
-```
-over the capture's complete breaths (`stack_ratio` default **1.5**), tightening
-the criterion to timing events that also stacked volume. **Off by default**
-so the detector matches the plain Thille timing definition; `vt_ratio` is
-always reported on flagged pairs so it can be reviewed either way.
+---
 
-## Edge case: the trailing partial breath
-A capture's last breath has no successor, so `te_sec` for it is an artifact
-of where the recording was cut off, not a real inter-breath gap (see
-[breath-segment.md](breath-segment.md) — `is_complete=False`). The detector
-never uses it as the *first* breath of a pair (the pair loop only runs
-`i in 0..len(breaths)-2`), so it cannot produce a false positive.
+## 2. Ineffective effort
 
-## On the sample dataset
-Under the app's recommended segmentation (`baseline="slope"`, default slope
-params) and the clinical default `ratio=0.5`, **this sample dataset produces
-zero flagged pairs** — the ~68 captures are short (few breaths each) and
-mostly controlled ventilation, so spontaneous-effort double-triggering may
-genuinely not appear here. Loosening `baseline="zero"`, `hysteresis=5`,
-`ratio=0.9` does produce flagged pairs (e.g. 47 across 23 captures), useful
-for exercising the detector, but the looser ratio no longer reflects the
-clinical definition — treat those as a sanity check, not a diagnosis.
+The patient's inspiratory muscles contract, but the ventilator's trigger threshold is
+never cleared, so **no breath is delivered**. Unlike double-triggering, this can never
+appear as a row in the breath table — it has to be found as a sub-threshold deflection
+inside an already-recorded **expiratory** window.
+
+⚠️ **Unlike double-triggering, there is no single agreed closed-form formula for this.**
+The gold-standard reference signal is esophageal pressure, which this dataset doesn't
+have; with only Flow/Pressure/Volume, detection has to work off a surrogate signature.
+The approach below — **require a concordant deflection in both Flow and Pressure** — is a
+deliberately conservative heuristic (fewer false positives, at the risk of missing effort
+that only shows clearly on one signal), in the spirit of how automated-asynchrony-detection
+literature (e.g. Younes et al.; Chen et al.'s review of automated methods) frames
+flow/pressure-only detection when esophageal pressure is unavailable. **Treat the
+thresholds below as a tunable starting point, not a validated clinical cutoff.**
+
+### Signature, per breath's own expiratory window (`insp_end_idx` → `exp_end_idx`)
+
+- **Flow**: expiratory flow normally decays smoothly toward baseline. An effort creates a
+  transient **bump** — a local rise before the decay resumes — that never clears the real
+  trigger band (if it did, it would already be a separate breath). Flagged if the bump's
+  **prominence** (rise from the *nearest preceding* local minimum, looking back at most
+  `bump_lookback_sec`) clears `flow_prominence` (default **25 L/min**) but stays below
+  `flow_prominence_max` (default **60 L/min**, matching the app's own slope-mode `PeakMin`
+  default): a bump that large almost certainly means segmentation missed an actual breath
+  (e.g. refractory suppression), not a genuinely failed effort, so it's excluded rather
+  than flagged.
+- **Pressure**: concurrently, the patient tugging against the circuit produces a small
+  negative **dip** in airway pressure. Flagged if its prominence (fall from the nearest
+  preceding local maximum, same bounded lookback) clears `pressure_prominence` (default
+  **1.5 cmH₂O**) and its trough sits within `concurrent_tol_sec` (default **0.3 s**) of the
+  flow bump's peak.
+
+Only pairs where **both** signals independently clear their threshold **and** occur close
+together in time are flagged. Both signals are lightly smoothed first (3-sample moving
+average) to suppress single-sample noise before looking for local extrema.
+
+#### Why `bump_lookback_sec` exists — a bug that made the first version fire on noise
+Prominence must be measured against a *recent* reference point, not "the lowest/highest
+value anywhere earlier in this multi-second expiratory window." The first version of this
+detector measured prominence as `value_at_peak - min(everything from the window's start
+up to the peak)` — so a late, tiny wiggle got credited with the *entire earlier decay
+curve* as its "rise," wildly inflating prominence for things that were just normal decay,
+not effort. Measured against this dataset's real per-breath expiratory windows:
+
+| | flow candidates clearing old default (8 L/min, unbounded) | pressure candidates clearing old default (1.0 cmH₂O, unbounded) |
+|---|---|---|
+| **before fix** | 98.1% (411/419) | 42.9% (247/576) |
+
+i.e. the detector was firing on essentially any expiratory window, which is exactly "it
+catches noise." Bounding the lookback to `bump_lookback_sec` (default **0.4 s** — a
+plausible timescale for an effort's own rise/fall) and recalibrating thresholds against
+the *corrected* distribution (roughly its 90th percentile, so only the genuinely unusual
+tail is flagged) fixed it:
+
+| | flow prominence (bounded, 0.4s lookback) | pressure prominence (bounded, 0.4s lookback) |
+|---|---|---|
+| 50th pctl | 5.5 L/min | 0.42 cmH₂O |
+| 90th pctl | 27.5 L/min | 1.42 cmH₂O |
+| 99th pctl | 41.2 L/min | 14.0 cmH₂O |
+
+New defaults (25 L/min, 1.5 cmH₂O) sit just above the 90th percentile of the corrected
+distribution.
+
+### On the sample dataset
+At the corrected default thresholds, this heuristic flags **16 events across 7 captures**
+(via the CLI) — down from 36/24 before the fix, and now comfortably clear of the measured
+noise floor. Still **not validated against ground truth**; there's no reference/expert
+labeling in this dataset to check against. Treat results as a starting point to review
+visually in the Viewer, not a diagnosis.
+
+---
+
+## 3. Auto-PEEP (air trapping)
+
+Full spec, formula derivation, and the worked example this implementation is validated
+against: **[auto-peep.md](../auto-peep.md)**. Summary: the lung doesn't fully empty before
+the next breath, so end-expiratory flow doesn't return to baseline (air trapping) and
+end-expiratory pressure sits above set PEEP (dynamic hyperinflation) — the physiological
+opposite of double-triggering's too-*short* Te; here expiration is too *incomplete*.
+Requires the flow signature (`flow_residual_frac > flow_frac` and `residual > flow_abs`)
+and, by default, the pressure signature too (`peep_delta > peep_min`) — `require_pressure=false`
+flags on flow alone. Both capture-level references (`z_ref`, `set_peep`) are estimated
+from the capture's own best-emptied breaths, so this finds breaths trapped *relative to*
+that capture, not absolute intrinsic PEEP. Only complete breaths are scored. Verified
+against `auto-peep.md`'s worked example (`bd4963...0_170204`, breath 0) field-for-field.
+
+On the sample dataset: **1 breath across 40 scanned captures** with the default
+flow+pressure mix; loosening to flow-only (`require_pressure=false`) finds **4 across 3**
+— the pressure gate is what adds specificity.
+
+---
+
+## On the sample dataset (double-triggering)
+Under the app's recommended segmentation (`baseline="slope"`) and the clinical default
+`ratio=0.5`, double-triggering produces **zero** flagged pairs on this sample — the ~68
+captures are short and mostly controlled ventilation, so spontaneous-effort
+double-triggering may genuinely not appear here. Loosening `baseline="zero"`,
+`hysteresis=5`, `ratio=0.9` does produce pairs (e.g. 47 across 23 captures), useful for
+exercising the detector, but the looser ratio no longer reflects the clinical definition.
+
+---
 
 ## API
+
+### `GET /api/asynchrony` — one capture, every detector
 ```
-GET /api/double-triggers?file=<capture.csv>
+GET /api/asynchrony?file=<capture.csv>
     &baseline=zero|auto|slope|<num>&hysteresis=&slope=&sdelta=&swin=&srefr=&sguard=&speak=
     &ratio=0.5&ti_ref=pair|capture|self&require_stacking=false&stack_ratio=1.5
+    &flow_prominence=25&flow_prominence_max=60&pressure_prominence=1.5
+    &concurrent_tol_sec=0.3&bump_lookback_sec=0.4
+    &flow_frac=0.15&flow_abs=2.0&peep_min=1.0&require_pressure=true
 ```
-Segmentation params are identical to `/api/breaths` (the pair timing comes
-directly from the chosen breath boundaries). Response:
+Segmentation params are identical to `/api/breaths`. Response:
 ```json
 {
-  "events": [ { "breath_idx_a": 0, "breath_idx_b": 1, "te_gap": 0.04,
-                "ti_ref": 0.86, "te_ti_ratio": 0.047,
-                "vt_pair": 858.7, "vt_ratio": 1.18, "stacked": false, ... } ],
+  "events": [
+    { "type": "double_trigger", "t0": 0.56, "t1": 6.0, "detail": "Te/Ti 0.05",
+      "breath_idx_a": 0, "breath_idx_b": 1, "te_gap": 0.28, "ti_ref": 2.44,
+      "te_ti_ratio": 0.047, "vt_pair": 936.2, "vt_ratio": 1.0, "stacked": false },
+    { "type": "ineffective_effort", "t0": 1.02, "t1": 1.67, "detail": "flow +32 L/min · pressure -3.0 cmH2O",
+      "breath_idx_a": 0, "breath_idx_b": 1, "t_flow_peak": 1.32, "t_pressure_trough": 1.52,
+      "flow_prominence": 32.4, "pressure_prominence": 2.96, "dt_sec": 0.2 },
+    { "type": "auto_peep", "t0": 1.72, "t1": 2.24, "detail": "residual 24% · PEEP +1.8 cmH2O · flow+pressure",
+      "breath_idx_a": 0, "flow_residual_frac": 0.235, "peep_delta": 1.76, "eef": 18.95,
+      "z_ref": 31.41, "eep": 3.87, "set_peep": 2.11, "residual": 12.46, "peak_mag": 53.02,
+      "pressure_flag": true }
+  ],
   "n_breaths": 6,
   "baseline": 0.0,
-  "formula": { "criterion": "te_gap < ratio * ti_ref", "ratio": 0.5, ... }
+  "formula": {
+    "double_trigger": { "criterion": "te_gap < ratio * ti_ref", "ratio": 0.5, "ti_ref": "pair", ... },
+    "ineffective_effort": { "criterion": "concordant flow-bump + pressure-dip within concurrent_tol_sec",
+                             "flow_prominence": 25.0, "flow_prominence_max": 60.0,
+                             "pressure_prominence": 1.5, "bump_lookback_sec": 0.4, ... },
+    "auto_peep": { "criterion": "flow_residual_frac > flow_frac (+ peep_delta > peep_min)",
+                   "flow_frac": 0.15, "flow_abs": 2.0, "peep_min": 1.0, "require_pressure": true }
+  }
 }
 ```
 
-## Notifications: scanning the whole dataset
+### `GET /api/auto-peep` — one capture, auto-PEEP only
+Same shape as `/api/double-triggers` (superseded by `/api/asynchrony` above) but for this
+one detector — mirrors [auto-peep.md](../auto-peep.md)'s own API section exactly, for
+callers that only want this detector without running the other two.
 
+### `GET /api/notifications` — scan + paginate
 ```
-GET /api/notifications
-    &baseline=zero|auto|slope|<num>&hysteresis=&slope=&sdelta=&swin=&srefr=&sguard=&speak=
-    &ratio=0.5&ti_ref=pair|capture|self&require_stacking=false&stack_ratio=1.5
+GET /api/notifications?<same params as above>
     &patient_id=<optional, restrict to one patient>
-    &include_disconnected=false  # captures flagged disconnected (flat flow) can't produce
-                                  # real events, so they're skipped by default for speed
+    &include_disconnected=false  # disconnected (flat-flow) captures can't produce real
+                                  # events, so they're skipped by default for speed
+    &page=1&page_size=10
 ```
-Loops every capture (or one patient's), runs the same segmentation + detector as
-`/api/double-triggers`, and flattens all flagged pairs into one list. Each
-notification carries a `type` (only `"double_trigger"` exists today — new
-asynchrony types can be added here without changing the response shape) and
-echoes the exact `segmentation` params used, so a client can reproduce the
-identical breath boundaries elsewhere:
+Loops every capture (or one patient's), runs `_scan_capture()` (all three detectors) on
+each, and returns one page of the flattened, most-recent-first list (sorted by capture `day`
+desc, then `time` desc — captures don't carry an absolute date, so cross-patient ordering
+is approximate). Each notification adds `patient_id`/`raw_data`/`day`/`time` plus the
+`segmentation` params used:
 ```json
 {
-  "notifications": [ { "type": "double_trigger", "patient_id": "...", "raw_data": "....csv",
-                        "day": 4, "time": "10:23:36", "breath_idx_a": 0, "breath_idx_b": 1,
-                        "t_insp_start_a": 0.56, "t_exp_end_b": 6.0, "te_gap": 0.28,
-                        "ti_ref": 2.44, "te_ti_ratio": 0.115, "vt_pair": 936.2,
-                        "vt_ratio": 1.0, "stacked": false,
-                        "segmentation": { "baseline": "zero", "hysteresis": 5.0, ... } } ],
+  "notifications": [ { "type": "ineffective_effort", "patient_id": "...", "raw_data": "....csv",
+                        "day": 14, "time": "11:18:25", "t0": ..., "t1": ..., "detail": "...",
+                        "breath_idx_a": 0, "breath_idx_b": 1, ...,
+                        "segmentation": { "baseline": "slope", "hysteresis": 0.0, ... } } ],
+  "page": 1, "page_size": 10, "total": 17, "total_pages": 2,
   "scanned_captures": 40,
-  "formula": { "criterion": "te_gap < ratio * ti_ref", "ratio": 0.5, ... }
+  "formula": { "double_trigger": {...}, "ineffective_effort": {...}, "auto_peep": {...} }
 }
 ```
 
-The Notifications page (`frontend/src/pages/NotificationsPage.jsx`) renders
-this list; clicking a notification builds a Viewer deep link:
+### The Viewer deep link
+The Notifications page builds, per card:
 ```
-/?file=<raw_data>&breath=<breath_idx_a>&<...segmentation>&ratio=&ti_ref=&require_stacking=&stack_ratio=
+/?file=<raw_data>&breath=<breath_idx_a>&<...segmentation>
+    &ratio=&ti_ref=&require_stacking=&stack_ratio=
+    &flow_prominence=&flow_prominence_max=&pressure_prominence=&concurrent_tol_sec=&bump_lookback_sec=
+    &flow_frac=&flow_abs=&peep_min=&require_pressure=
 ```
-The Viewer (`ViewerPage.jsx`) reads this once on mount: selects the owning
-patient/capture, applies the same segmentation *and* formula params, and
-selects `breath_idx_a` in the breath dropdown. It then runs its **own**
-`/api/double-triggers` fetch for that capture (independent of the deep link —
-this happens on every capture the Viewer ever loads, not just deep-linked
-ones) and highlights **every** flagged pair it finds, marking whichever one
-matches the `breath` param as active (brighter band). Passing the exact same
-`ratio`/`ti_ref`/`require_stacking`/`stack_ratio` the notification was
-generated with guarantees that event reappears in the Viewer's fresh scan —
-an earlier version passed raw `t0`/`t1` seconds instead, which went stale (wrong
-region highlighted, or none) the moment the user switched to a different
-capture; deriving the highlight from a live per-capture fetch instead of
-stored seconds removes that failure mode structurally.
+The Viewer reads this once on mount: selects the owning patient/capture, applies the same
+segmentation and **every** formula, and selects `breath_idx_a` in the breath dropdown. It
+then runs its **own** `/api/asynchrony` fetch for that capture (this happens on every
+capture the Viewer ever loads, not just deep-linked ones) and highlights every event it
+finds, marking whichever one matches the `breath` param as active (brighter band). Passing
+the exact formula params the notification was generated with guarantees that event
+reappears in the Viewer's fresh scan — deriving the highlight from a live per-capture
+fetch (rather than storing raw `t0`/`t1` seconds from the notification itself) means
+switching capture/patient can never leave a stale band on the wrong waveform.
 
 ## CLI
 ```bash
 python3 backend/asynchrony.py [data_dir] [--baseline slope] [--hysteresis N] \
     [--ratio 0.5] [--ti-ref pair|capture|self] [--require-stacking] [--stack-ratio 1.5]
+
+python3 backend/ineffective_effort.py [data_dir] [--baseline slope] [--hysteresis N] \
+    [--flow-prominence 25] [--pressure-prominence 1.5] [--concurrent-tol-sec 0.3] \
+    [--bump-lookback-sec 0.4]
+
+python3 backend/auto_peep.py [data_dir] [--baseline slope] [--hysteresis N] \
+    [--flow-frac 0.15] [--flow-abs 2.0] [--peep-min 1.0] [--flow-only]
 ```

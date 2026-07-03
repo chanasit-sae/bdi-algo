@@ -62,14 +62,14 @@ export function paramsFromSearchParams(sp) {
 // Defaults for the double-triggering formula itself (separate from breath
 // segmentation) — shared by every page that runs the detector
 // (NotificationsPage, ViewerPage).
-export const DEFAULT_ASYNCHRONY_PARAMS = {
+export const DEFAULT_DT_PARAMS = {
   ratio: 0.5,
   tiRef: "pair",
   requireStacking: false,
   stackRatio: 1.5,
 };
 
-export function asynchronyQuery(params) {
+export function dtQuery(params) {
   return {
     ratio: params.ratio,
     ti_ref: params.tiRef,
@@ -78,16 +78,74 @@ export function asynchronyQuery(params) {
   };
 }
 
-// The inverse of asynchronyQuery — mirrors paramsFromSearchParams above, so a
-// Viewer deep link can reproduce the exact ratio/ti_ref that flagged an event
+// The inverse of dtQuery — mirrors paramsFromSearchParams above, so a Viewer
+// deep link can reproduce the exact ratio/ti_ref that flagged an event
 // (otherwise the event might not reappear in the Viewer's own fresh scan).
 // Returns null if the URL carries no formula info.
-export function asynchronyParamsFromSearchParams(sp) {
+export function dtParamsFromSearchParams(sp) {
   if (!sp.has("ratio")) return null;
   return {
-    ratio: Number(sp.get("ratio")) || DEFAULT_ASYNCHRONY_PARAMS.ratio,
-    tiRef: sp.get("ti_ref") || DEFAULT_ASYNCHRONY_PARAMS.tiRef,
+    ratio: Number(sp.get("ratio")) || DEFAULT_DT_PARAMS.ratio,
+    tiRef: sp.get("ti_ref") || DEFAULT_DT_PARAMS.tiRef,
     requireStacking: sp.get("require_stacking") === "true",
-    stackRatio: Number(sp.get("stack_ratio") ?? DEFAULT_ASYNCHRONY_PARAMS.stackRatio),
+    stackRatio: Number(sp.get("stack_ratio") ?? DEFAULT_DT_PARAMS.stackRatio),
+  };
+}
+
+// Defaults for the ineffective-effort formula (concordant flow-bump +
+// pressure-dip) — same sharing pattern as the double-trigger params above.
+export const DEFAULT_IE_PARAMS = {
+  flowProminence: 25,
+  flowProminenceMax: 60,
+  pressureProminence: 1.5,
+  concurrentTol: 0.3,
+  bumpLookback: 0.4,
+};
+
+export function ieQuery(params) {
+  return {
+    flow_prominence: params.flowProminence,
+    flow_prominence_max: params.flowProminenceMax,
+    pressure_prominence: params.pressureProminence,
+    concurrent_tol_sec: params.concurrentTol,
+    bump_lookback_sec: params.bumpLookback,
+  };
+}
+
+export function ieParamsFromSearchParams(sp) {
+  if (!sp.has("flow_prominence")) return null;
+  return {
+    flowProminence: Number(sp.get("flow_prominence")) || DEFAULT_IE_PARAMS.flowProminence,
+    flowProminenceMax: Number(sp.get("flow_prominence_max")) || DEFAULT_IE_PARAMS.flowProminenceMax,
+    pressureProminence: Number(sp.get("pressure_prominence") ?? DEFAULT_IE_PARAMS.pressureProminence),
+    concurrentTol: Number(sp.get("concurrent_tol_sec") ?? DEFAULT_IE_PARAMS.concurrentTol),
+    bumpLookback: Number(sp.get("bump_lookback_sec") ?? DEFAULT_IE_PARAMS.bumpLookback),
+  };
+}
+
+// Defaults for the auto-PEEP (air trapping) formula — see auto-peep.md.
+export const DEFAULT_AP_PARAMS = {
+  flowFrac: 0.15,
+  flowAbs: 2.0,
+  peepMin: 1.0,
+  requirePressure: true,
+};
+
+export function apQuery(params) {
+  return {
+    flow_frac: params.flowFrac,
+    flow_abs: params.flowAbs,
+    peep_min: params.peepMin,
+    require_pressure: params.requirePressure,
+  };
+}
+
+export function apParamsFromSearchParams(sp) {
+  if (!sp.has("flow_frac")) return null;
+  return {
+    flowFrac: Number(sp.get("flow_frac")) || DEFAULT_AP_PARAMS.flowFrac,
+    flowAbs: Number(sp.get("flow_abs") ?? DEFAULT_AP_PARAMS.flowAbs),
+    peepMin: Number(sp.get("peep_min") ?? DEFAULT_AP_PARAMS.peepMin),
+    requirePressure: sp.get("require_pressure") !== "false",
   };
 }

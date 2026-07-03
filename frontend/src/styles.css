@@ -240,6 +240,30 @@ aside h2 {
   color: var(--muted);
 }
 
+/* ---- pagination ---- */
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+.pagination button {
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.pagination button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+.pagination button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* ---- generic page (about etc.) ---- */
 .page {
   padding: 24px;
