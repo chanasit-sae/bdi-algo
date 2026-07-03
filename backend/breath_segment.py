@@ -82,6 +82,48 @@ def _detect_crossings(
     return np.array(rising, dtype=int), np.array(falling, dtype=int)
 
 
+def _detect_slope_onsets(
+    flow: np.ndarray,
+    window: int,
+    delta_threshold: float,
+    refractory: int | None = None,
+    exp_guard: float = 0.0,
+) -> np.ndarray:
+    """Return inspiration-onset indices from a rise in slope relative to its trend.
+
+    Level-agnostic detector (no baseline needed): compute the slope at each point,
+    keep a trailing window of the past `window` slopes as the local trend (their
+    mean), and flag point i as a breath start when its slope exceeds that trend by
+    at least `delta_threshold`. A refractory gap (default = `window`) prevents the
+    same rising edge from firing repeatedly. Because it keys on the *change* in
+    slope, it segments captures whose flow is offset high and never crosses zero.
+
+    exp_guard (L/min per second, 0 = off) rejects candidates that sit on the
+    expiratory limb: if the flow was steeply *decreasing* just before the candidate
+    (min slope over the trailing window drops below `-exp_guard`), the point is a
+    fall into / recovery out of expiration, not a real inspiratory onset, so it is
+    skipped. A real onset is preceded by the near-flat end-expiratory pause, whose
+    slope stays above the guard; the guard is a magnitude so plateau noise dipping
+    slightly negative is not mistaken for expiration.
+
+    window / refractory are in samples; delta_threshold / exp_guard are L/min per s.
+    """
+    slope = np.gradient(flow) * SAMPLE_RATE_HZ
+    if refractory is None:
+        refractory = window
+    onsets: list[int] = []
+    last = -(10 ** 9)
+    for i in range(window, len(flow)):
+        trend = slope[i - window:i].mean()
+        if slope[i] - trend < delta_threshold or (i - last) <= refractory:
+            continue
+        if exp_guard > 0 and slope[i - window:i].min() < -exp_guard:
+            continue
+        onsets.append(i)
+        last = i
+    return np.array(onsets, dtype=int)
+
+
 def segment_capture(
     wf: pd.DataFrame,
     patient_id: str = "",
@@ -90,20 +132,34 @@ def segment_capture(
     baseline: str | float = "zero",
     hysteresis: float = 0.0,
     slope_threshold: float = 0.0,
+    slope_window_sec: float = 0.32,
+    slope_delta: float = 100.0,
+    slope_refractory_sec: float = 1.0,
+    slope_exp_guard: float = 100.0,
 ) -> pd.DataFrame:
     """Segment one waveform DataFrame (from load_waveform) into breaths.
 
     min_breath_sec: drop breaths shorter than this (0 = no filter).
-    baseline: "zero" (literal 0), "auto" (low-percentile offset), or a numeric offset.
+    baseline: "zero" (literal 0), "auto" (low-percentile offset), "slope" (adaptive
+        slope-change onset detection, level-agnostic), or a numeric offset.
     hysteresis: dead-band (L/min) around the baseline to reject noise crossings.
     slope_threshold: min rise rate (L/min per second) at the inspiration onset;
         both this and the hysteresis band must be met to mark a breath boundary
-        (0 = no slope gate).
+        (0 = no slope gate). Used by the level-crossing modes only.
+    slope_window_sec / slope_delta / slope_refractory_sec / slope_exp_guard: for
+        baseline="slope" — the trailing trend window (seconds), the slope-jump
+        threshold (L/min per second) above that trend that flags a breath start, the
+        minimum spacing between onsets (seconds), and the expiratory guard (L/min per
+        second) that drops candidates preceded by a steep flow *decrease* i.e. the
+        expiratory limb (see `_detect_slope_onsets`).
     """
     flow = wf["flow"].to_numpy()
-    if baseline in ("auto", "patient"):
+    slope_mode = baseline == "slope"
+    if baseline in ("auto", "patient", "slope"):
         # "patient" is resolved to a number by segment_dataset; if it reaches here
-        # (single-capture call) it degrades to per-capture auto.
+        # (single-capture call) it degrades to per-capture auto. "slope" uses the
+        # auto baseline only to find expiration onsets (insp_end); its breath
+        # boundaries come from the slope-change detector.
         base = estimate_baseline(flow)
     elif baseline == "zero":
         base = 0.0
@@ -113,7 +169,13 @@ def segment_capture(
     volume = wf["volume"].to_numpy()
     n = len(flow)
 
-    rising, falling = _detect_crossings(flow, base, hysteresis, slope_threshold)
+    if slope_mode:
+        window = max(1, int(round(slope_window_sec * SAMPLE_RATE_HZ)))
+        refractory = max(1, int(round(slope_refractory_sec * SAMPLE_RATE_HZ)))
+        rising = _detect_slope_onsets(flow, window, slope_delta, refractory, slope_exp_guard)
+        _, falling = _detect_crossings(flow, base, hysteresis)
+    else:
+        rising, falling = _detect_crossings(flow, base, hysteresis, slope_threshold)
     rows = []
     min_len = int(round(min_breath_sec * SAMPLE_RATE_HZ))
 
@@ -168,6 +230,10 @@ def segment_dataset(
     baseline: str | float = "zero",
     hysteresis: float = 0.0,
     slope_threshold: float = 0.0,
+    slope_window_sec: float = 0.32,
+    slope_delta: float = 100.0,
+    slope_refractory_sec: float = 1.0,
+    slope_exp_guard: float = 100.0,
 ) -> pd.DataFrame:
     """Segment every capture referenced in a data directory into one breath table.
 
@@ -193,7 +259,9 @@ def segment_dataset(
     frames = []
     for pid, raw, wf in loaded:
         base = patient_base[pid] if baseline == "patient" else baseline
-        frames.append(segment_capture(wf, pid, raw, min_breath_sec, base, hysteresis, slope_threshold))
+        frames.append(segment_capture(wf, pid, raw, min_breath_sec, base, hysteresis,
+                                       slope_threshold, slope_window_sec, slope_delta,
+                                       slope_refractory_sec, slope_exp_guard))
     if not frames:
         return pd.DataFrame(columns=BREATH_COLUMNS)
     out = pd.concat(frames, ignore_index=True)
@@ -229,7 +297,8 @@ if __name__ == "__main__":
     ap.add_argument("--min-breath-sec", type=float, default=0.0)
     ap.add_argument("--baseline", default="zero",
                     help='"zero" (default), "auto" (per-capture low percentile), '
-                         '"patient" (per-patient low percentile), or a numeric offset; '
+                         '"patient" (per-patient low percentile), "slope" (adaptive '
+                         'slope-change onset detection), or a numeric offset; '
                          'pair auto/patient with --hysteresis')
     ap.add_argument("--hysteresis", type=float, default=0.0,
                     help="dead-band (L/min) around baseline to reject noise crossings")
@@ -237,14 +306,30 @@ if __name__ == "__main__":
                     help="min rise rate (L/min per second) at inspiration onset; "
                          "both this and the hysteresis band must be met to mark a "
                          "breath (0 = off; recommended ~30)")
+    ap.add_argument("--slope-window-sec", type=float, default=0.32,
+                    help="baseline=slope: trailing trend window in seconds (default 0.32)")
+    ap.add_argument("--slope-delta", type=float, default=100.0,
+                    help="baseline=slope: slope jump (L/min per second) above the "
+                         "recent trend that flags a breath start (default 100)")
+    ap.add_argument("--slope-refractory-sec", type=float, default=1.0,
+                    help="baseline=slope: min spacing between onsets in seconds; "
+                         "suppresses the expiratory-recovery double-fire (default 1.0)")
+    ap.add_argument("--slope-exp-guard", type=float, default=100.0,
+                    help="baseline=slope: drop onsets preceded by a steep flow "
+                         "decrease (expiratory limb); min pre-onset slope below "
+                         "this magnitude (L/min per second) is rejected (0 = off, default 100)")
     args = ap.parse_args()
 
     baseline = args.baseline
-    if baseline not in ("zero", "auto", "patient"):
+    if baseline not in ("zero", "auto", "patient", "slope"):
         baseline = float(baseline)
     breaths = segment_dataset(args.data_dir, min_breath_sec=args.min_breath_sec,
                               baseline=baseline, hysteresis=args.hysteresis,
-                              slope_threshold=args.slope_threshold)
+                              slope_threshold=args.slope_threshold,
+                              slope_window_sec=args.slope_window_sec,
+                              slope_delta=args.slope_delta,
+                              slope_refractory_sec=args.slope_refractory_sec,
+                              slope_exp_guard=args.slope_exp_guard)
     n_partial = int((~breaths["is_complete"]).sum())
     print(f"segmented {breaths['raw_data'].nunique()} captures "
           f"into {len(breaths)} breaths "

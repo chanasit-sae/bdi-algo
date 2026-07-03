@@ -46,6 +46,39 @@ derivative, `np.gradient(flow) * SAMPLE_RATE_HZ`.
   breath, because it must also coincide with an upward band crossing — that is the
   reason both conditions are required.
 
+### `baseline="slope"` — adaptive slope-change onset detection
+A **level-agnostic** onset detector (`_detect_slope_onsets`) that needs no baseline
+crossing at all, so it segments captures whose flow is offset high and never crosses
+zero (the main failure mode of level crossing). At each sample it compares the current
+slope to the **trend of the previous `slope_window_sec` of slopes** (their mean) and
+flags a breath start when the jump exceeds `slope_delta`:
+
+- **`slope_window_sec`** (default **0.32 s** ≈ 8 samples) — trailing trend window. On
+  this data, true onsets jump ~278 L/min/s (p25 ~198) above this trend, while flat
+  captures sit at ~8, so the window cleanly separates real efforts from noise.
+- **`slope_delta`** (default **100 L/min/s**) — the jump above trend that flags an onset.
+- **`slope_refractory_sec`** (default **1.0 s**) — minimum spacing between onsets.
+  *Required*: a slope-only detector fires **twice** per breath — once at the inspiratory
+  onset and once at the expiratory recovery back to baseline (~0.68 s later on this
+  data), since both are upward slope jumps. A 1.0 s refractory suppresses the second
+  flag (and caps detectable rate at 60 bpm). At the default it reproduces the
+  zero-crossing breath count on cycling captures (13 = 13) and recovers 6 offset-high
+  captures that zero-crossing misses.
+- **`slope_exp_guard`** (default **100 L/min/s**, 0 = off) — drops candidates that sit
+  on the **expiratory limb**. A real inspiratory onset is preceded by the near-flat
+  end-expiratory pause (min slope over the trailing window ≥ ~−26 on this data); an
+  expiratory / noise onset is preceded by a steep flow *decrease* (min slope ≤ ~−300).
+  If the pre-onset min slope drops below `−slope_exp_guard`, the point is a fall
+  into / recovery out of expiration, not a breath start, so it is skipped. It is a
+  *magnitude* so plateau noise dipping slightly negative is not mistaken for
+  expiration. On this sample the guard removes **92** such false onsets (**207 → 115
+  breaths**, 39 captures unchanged) — almost all noise wobble on the flat `bd4963…`
+  captures — while leaving the real cycling breaths intact.
+
+In this mode expiration onsets (`insp_end`) still come from the level crossing of the
+per-capture `auto` baseline, so `ti`/`te` and the volume/pressure metrics stay defined.
+The level-mode knobs (`hysteresis`, `slope_threshold`) do not apply.
+
 ### Baseline & hysteresis
 Real flow may not return exactly to zero at the inspiration→expiration transition
 (sensor bias, leaks) and is noisy near the crossing. Two levers address this:
@@ -81,8 +114,8 @@ Real flow may not return exactly to zero at the inspiration→expiration transit
 ## Public API
 | Function | Purpose |
 |----------|---------|
-| `segment_capture(wf, patient_id, raw_data, min_breath_sec=0.0, baseline="zero", hysteresis=0.0, slope_threshold=0.0)` | Segment one `load_waveform` DataFrame → breath table |
-| `segment_dataset(data_dir, min_breath_sec=0.0, baseline="zero", hysteresis=0.0, slope_threshold=0.0)` | Segment every referenced capture → one combined table |
+| `segment_capture(wf, patient_id, raw_data, min_breath_sec=0.0, baseline="zero", hysteresis=0.0, slope_threshold=0.0, slope_window_sec=0.32, slope_delta=100.0, slope_refractory_sec=1.0, slope_exp_guard=100.0)` | Segment one `load_waveform` DataFrame → breath table |
+| `segment_dataset(data_dir, min_breath_sec=0.0, baseline="zero", hysteresis=0.0, slope_threshold=0.0, slope_window_sec=0.32, slope_delta=100.0, slope_refractory_sec=1.0, slope_exp_guard=100.0)` | Segment every referenced capture → one combined table |
 | `estimate_baseline(flow, q=5.0)` | Low-percentile (end-expiratory) baseline estimate |
 | `save_breaths(df, path)` | Persist the breath table (Parquet or CSV by extension) |
 

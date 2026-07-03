@@ -131,8 +131,8 @@ INDEX_HTML = r"""<!doctype html>
   <div><label>Patient</label><select id="patient"></select></div>
   <div><label>Capture</label><select id="capture"></select></div>
   <div><label>Breath</label><select id="breath"></select></div>
-  <div><label title="crossing baseline: zero, auto = per-capture low-percentile offset, or manual = the offset field">Baseline</label>
-    <select id="baseline"><option value="zero">zero</option><option value="auto">auto</option><option value="manual">manual</option></select></div>
+  <div><label title="crossing baseline: zero, auto = per-capture low-percentile offset, manual = the offset field, slope = adaptive slope-change onset detection (level-agnostic)">Baseline</label>
+    <select id="baseline"><option value="zero">zero</option><option value="auto">auto</option><option value="manual">manual</option><option value="slope">slope</option></select></div>
   <div><label title="manual crossing-baseline offset (L/min); used when Baseline = manual">Offset</label>
     <input id="baseoff" type="number" value="0" step="1" style="width:64px;
       background:#0b1119;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px"></div>
@@ -141,6 +141,18 @@ INDEX_HTML = r"""<!doctype html>
       background:#0b1119;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px"></div>
   <div><label title="min flow rise rate (L/min per second) at inspiration onset; both this and hysteresis must be met to mark a breath. ~30 recommended">Slope</label>
     <input id="slope" type="number" value="30" min="0" step="1" style="width:64px;
+      background:#0b1119;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px"></div>
+  <div><label title="Baseline=slope: slope jump (L/min per second) above the recent trend that flags a breath start">&Delta;slope</label>
+    <input id="sdelta" type="number" value="100" min="0" step="5" style="width:64px;
+      background:#0b1119;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px"></div>
+  <div><label title="Baseline=slope: trailing trend window in seconds">Win s</label>
+    <input id="swin" type="number" value="0.32" min="0.04" step="0.04" style="width:64px;
+      background:#0b1119;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px"></div>
+  <div><label title="Baseline=slope: min spacing between onsets in seconds; suppresses the expiratory-recovery double-fire">Refr s</label>
+    <input id="srefr" type="number" value="1.0" min="0" step="0.1" style="width:64px;
+      background:#0b1119;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px"></div>
+  <div><label title="Baseline=slope: drop onsets preceded by a steep flow DECREASE (expiratory limb); pre-onset slope below this magnitude (L/min per second) is rejected. 0 = off">ExpGuard</label>
+    <input id="sguard" type="number" value="100" min="0" step="10" style="width:64px;
       background:#0b1119;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px"></div>
   <div><label title="also list flat captures where the ventilator is not connected to a patient">Show disconnected</label>
     <input id="showDisc" type="checkbox"></div>
@@ -225,21 +237,28 @@ function renderCharts(sel){
   drawChart('c-flow', wf.t_sec, wf.flow, COLORS.flow, CUR.breaths, sel, CUR.baseline);
   drawChart('c-pressure', wf.t_sec, wf.pressure, COLORS.pressure, CUR.breaths, sel, null);
   drawChart('c-volume', wf.t_sec, wf.volume, COLORS.volume, CUR.breaths, sel, null);
-  const slopeThr = parseFloat(document.getElementById('slope').value) || 0;
-  drawChart('c-slope', wf.t_sec, wf.slope, COLORS.slope, CUR.breaths, sel, slopeThr || null);
+  const slopeRef = (document.getElementById('baseline').value === 'slope')
+    ? (parseFloat(document.getElementById('sdelta').value) || 0)
+    : (parseFloat(document.getElementById('slope').value) || 0);
+  drawChart('c-slope', wf.t_sec, wf.slope, COLORS.slope, CUR.breaths, sel, slopeRef || null);
 }
 
 async function selectCapture(file){
   document.getElementById('status').textContent = 'loading '+file+' ...';
   const hyst = parseFloat(document.getElementById('hyst').value) || 0;
   const slope = parseFloat(document.getElementById('slope').value) || 0;
+  const sdelta = parseFloat(document.getElementById('sdelta').value) || 0;
+  const swin = parseFloat(document.getElementById('swin').value) || 0.32;
+  const srefr = parseFloat(document.getElementById('srefr').value) || 0;
+  const sguard = parseFloat(document.getElementById('sguard').value) || 0;
   const mode = document.getElementById('baseline').value;
   const baseline = (mode === 'manual')
     ? (parseFloat(document.getElementById('baseoff').value) || 0)
     : mode;
   const [wf, br] = await Promise.all([
     j('/api/waveform?file='+encodeURIComponent(file)),
-    j('/api/breaths?file='+encodeURIComponent(file)+'&hysteresis='+hyst+'&baseline='+baseline+'&slope='+slope),
+    j('/api/breaths?file='+encodeURIComponent(file)+'&hysteresis='+hyst+'&baseline='+baseline
+      +'&slope='+slope+'&sdelta='+sdelta+'&swin='+swin+'&srefr='+srefr+'&sguard='+sguard),
   ]);
   CUR = { file, wf, breaths: br.breaths, baseline: br.baseline };
   const n = wf.t_sec.length, dur = wf.t_sec[n-1] || 0;
@@ -307,11 +326,19 @@ function renderBreathMeta(b){
 }
 
 function syncBaselineUI(){
-  // offset is only meaningful in manual mode: enable it then, grey it out otherwise
-  const manual = document.getElementById('baseline').value === 'manual';
-  const off = document.getElementById('baseoff');
-  off.disabled = !manual;
-  off.style.opacity = manual ? '1' : '0.4';
+  // grey out fields that don't apply to the current baseline mode
+  const mode = document.getElementById('baseline').value;
+  const setEnabled = (id, on) => { const e=document.getElementById(id);
+    e.disabled=!on; e.style.opacity=on?'1':'0.4'; };
+  setEnabled('baseoff', mode === 'manual');
+  const slopeMode = mode === 'slope';
+  setEnabled('sdelta', slopeMode);
+  setEnabled('swin', slopeMode);
+  setEnabled('srefr', slopeMode);
+  setEnabled('sguard', slopeMode);
+  // the level-crossing slope gate / hysteresis don't apply in slope mode
+  setEnabled('slope', !slopeMode);
+  setEnabled('hyst', !slopeMode);
 }
 
 function showDisc(){ return document.getElementById('showDisc').checked; }
@@ -343,6 +370,8 @@ async function init(){
   document.getElementById('breath').onchange = onBreathChange;
   document.getElementById('hyst').onchange = () => { if(CUR.file) selectCapture(CUR.file); };
   document.getElementById('slope').onchange = () => { if(CUR.file) selectCapture(CUR.file); };
+  for(const id of ['sdelta','swin','srefr','sguard'])
+    document.getElementById(id).onchange = () => { if(CUR.file) selectCapture(CUR.file); };
   document.getElementById('baseline').onchange = () => { syncBaselineUI(); if(CUR.file) selectCapture(CUR.file); };
   document.getElementById('baseoff').oninput = () => { if(CUR.file) selectCapture(CUR.file); };
   syncBaselineUI();
@@ -409,14 +438,23 @@ class Handler(BaseHTTPRequestHandler):
                 hyst = max(0.0, float(qs.get("hysteresis", ["0"])[0]))
             except ValueError:
                 hyst = 0.0
-            try:
-                slope = max(0.0, float(qs.get("slope", ["0"])[0]))
-            except ValueError:
-                slope = 0.0
+            def _qf(key, default):
+                try:
+                    return float(qs.get(key, [str(default)])[0])
+                except ValueError:
+                    return default
+            slope = max(0.0, _qf("slope", 0.0))
+            sdelta = max(0.0, _qf("sdelta", 100.0))
+            swin = max(0.04, _qf("swin", 0.32))
+            srefr = max(0.0, _qf("srefr", 1.0))
+            sguard = max(0.0, _qf("sguard", 100.0))
             baseline = qs.get("baseline", ["zero"])[0]
             wf = load_waveform(self.data_dir / fname)
             if baseline == "auto":
                 base_arg = "auto"
+                base_val = estimate_baseline(wf["flow"].to_numpy())
+            elif baseline == "slope":
+                base_arg = "slope"
                 base_val = estimate_baseline(wf["flow"].to_numpy())
             elif baseline == "zero":
                 base_arg, base_val = "zero", 0.0
@@ -427,7 +465,9 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError:
                     base_arg, base_val = "zero", 0.0
             breaths = segment_capture(wf, raw_data=fname, baseline=base_arg,
-                                      hysteresis=hyst, slope_threshold=slope)
+                                      hysteresis=hyst, slope_threshold=slope,
+                                      slope_window_sec=swin, slope_delta=sdelta,
+                                      slope_refractory_sec=srefr, slope_exp_guard=sguard)
             self._json({"breaths": breaths.to_dict(orient="records"), "baseline": base_val})
         else:
             self._json({"error": "not found"}, 404)
