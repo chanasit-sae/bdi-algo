@@ -40,16 +40,18 @@ class SPAStaticFiles(StaticFiles):
 
 
 async def _warmup_notifications(ds: Dataset) -> None:
-    """Pre-scan the dataset for the Notifications page's (fixed) default
-    params in the background, off the startup path, so a slow/large dataset
-    doesn't delay the whole app becoming reachable — just this one cache.
-    Runs in a thread since the scan itself is sync CPU/IO-bound work.
+    """Advance the Notifications page's default asynchrony scan toward
+    completion in the background, off the startup path — a slow/huge dataset
+    then delays only this one (self-healing) cache, not the whole app's
+    availability. Runs in a thread since the scan itself is sync CPU/IO work;
+    live requests race the same shared scan state and cooperate with it (see
+    NotificationScan in dataset.py), so nothing here is wasted duplicate work.
     """
     try:
         await asyncio.to_thread(asynchrony.warmup_notifications, ds)
-        print("notifications cache warmed")
-    except Exception as e:  # non-fatal: the first real request will just fall back to computing + caching itself
-        print(f"notifications warmup skipped (non-fatal): {e}")
+        print("notifications scan complete (background warmup)")
+    except Exception as e:  # non-fatal: live requests still advance the same scan themselves
+        print(f"notifications warmup stopped early (non-fatal): {e}")
 
 
 @asynccontextmanager
