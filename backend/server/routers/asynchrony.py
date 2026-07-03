@@ -218,18 +218,15 @@ def _notification_sort_key(n: dict):
     return (day, n["time"] or "")
 
 
-@router.get("/notifications")
-def get_notifications(
-    seg: dict = Depends(segmentation_params),
-    dt: dict = Depends(dt_params),
-    ie: dict = Depends(ie_params),
-    ap: dict = Depends(auto_peep_params),
-    patient_id: str | None = Query(None, description="restrict the scan to one patient; omit to scan the whole dataset"),
-    include_disconnected: bool = Query(False, description="also scan captures flagged disconnected (flat flow, no real breathing -> never produces events, skipped by default for speed)"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(10, ge=1, le=100),
-    ds: Dataset = Depends(get_dataset),
-):
+def _scan_dataset(
+    ds: Dataset, seg: dict, dt: dict, ie: dict, ap: dict,
+    patient_id: str | None, include_disconnected: bool,
+) -> tuple[list[dict], int]:
+    """Scan every capture (or one patient's) and return the full, sorted,
+    unpaginated notification list. This is the expensive part of
+    /api/notifications — cached by the caller (see `notification_cache` on
+    Dataset) since these params rarely change between requests.
+    """
     seg_echo = {k: seg[k] for k in _SEG_KEYS}
 
     all_notifications: list[dict] = []
@@ -255,6 +252,37 @@ def get_notifications(
                 })
 
     all_notifications.sort(key=_notification_sort_key, reverse=True)
+    return all_notifications, scanned
+
+
+def _notif_cache_key(seg, dt, ie, ap, patient_id, include_disconnected):
+    """A hashable key covering every param that affects the scan result."""
+    return (
+        tuple(sorted(seg.items())), tuple(sorted(dt.items())),
+        tuple(sorted(ie.items())), tuple(sorted(ap.items())),
+        patient_id, include_disconnected,
+    )
+
+
+@router.get("/notifications")
+def get_notifications(
+    seg: dict = Depends(segmentation_params),
+    dt: dict = Depends(dt_params),
+    ie: dict = Depends(ie_params),
+    ap: dict = Depends(auto_peep_params),
+    patient_id: str | None = Query(None, description="restrict the scan to one patient; omit to scan the whole dataset"),
+    include_disconnected: bool = Query(False, description="also scan captures flagged disconnected (flat flow, no real breathing -> never produces events, skipped by default for speed)"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    ds: Dataset = Depends(get_dataset),
+):
+    key = _notif_cache_key(seg, dt, ie, ap, patient_id, include_disconnected)
+    cached = ds.notification_cache.get(key)
+    if cached is None:
+        cached = _scan_dataset(ds, seg, dt, ie, ap, patient_id, include_disconnected)
+        ds.notification_cache[key] = cached
+    all_notifications, scanned = cached
+
     total = len(all_notifications)
     start = (page - 1) * page_size
     page_items = all_notifications[start : start + page_size]
@@ -268,3 +296,24 @@ def get_notifications(
         "scanned_captures": scanned,
         "formula": _formula_block(dt, ie, ap),
     })
+
+
+def warmup_notifications(ds: Dataset) -> None:
+    """Pre-run the exact scan the Notifications page always requests (it has
+    no tunable controls, so this is the only param combination it ever asks
+    for) and cache it, so the very first visitor never waits on a full scan —
+    called once at server startup, mirroring how `ds.index` is force-built
+    eagerly in main.py's lifespan.
+    """
+    seg = segmentation_params(
+        baseline="slope", hysteresis=0.0, slope=0.0, sdelta=100.0,
+        swin=0.32, srefr=1.0, sguard=100.0, speak="mean",
+    )
+    dt = dt_params(ratio=0.5, ti_ref="pair", require_stacking=False, stack_ratio=1.5)
+    ie = ie_params(
+        flow_prominence=25.0, flow_prominence_max=60.0,
+        pressure_prominence=1.5, concurrent_tol_sec=0.3, bump_lookback_sec=0.4,
+    )
+    ap = auto_peep_params(flow_frac=0.15, flow_abs=2.0, peep_min=1.0, require_pressure=True)
+    key = _notif_cache_key(seg, dt, ie, ap, None, False)
+    ds.notification_cache[key] = _scan_dataset(ds, seg, dt, ie, ap, None, False)

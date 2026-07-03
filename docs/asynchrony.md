@@ -221,6 +221,19 @@ each, and returns one page of the flattened, most-recent-first list (sorted by c
 desc, then `time` desc — captures don't carry an absolute date, so cross-patient ordering
 is approximate). Each notification adds `patient_id`/`raw_data`/`day`/`time` plus the
 `segmentation` params used:
+
+**Caching.** The full (unpaginated) scan is the expensive part — re-running it on every
+page flip or repeat visit for a page that has no tunable controls (so always asks for the
+same params) is pure waste. `Dataset.notification_cache` (`backend/server/dataset.py`)
+caches the scan result keyed by every param that affects it (segmentation + all three
+formulas + `patient_id` + `include_disconnected`); `page`/`page_size` only slice the cached
+list, they never trigger a re-scan. `warmup_notifications()` additionally pre-runs the
+Notifications page's exact default param set as a **background task at server startup**
+(`main.py`'s lifespan, via `asyncio.to_thread` so it doesn't block the app from accepting
+requests) — the first visitor should generally never wait on a cold scan. Measured on the
+local sample: a cache hit is ~35x faster than the scan it replaces (374ms -> 10ms); the
+gap is expected to be larger on the VM's full dataset, where the underlying scan itself
+takes longer.
 ```json
 {
   "notifications": [ { "type": "ineffective_effort", "patient_id": "...", "raw_data": "....csv",

@@ -82,11 +82,18 @@ def build_index(data_dir: Path) -> dict:
 
 
 class Dataset:
-    """Lazily-built, cached dataset index for the running server."""
+    """Lazily-built, cached dataset index for the running server.
+
+    `notification_cache` is a plain dict (key -> (notifications, scanned_count))
+    used by the asynchrony router to avoid re-scanning the whole dataset on
+    every /api/notifications request. Owned here rather than module-level in
+    the router so it lives and dies with this one server process/instance.
+    """
 
     def __init__(self, data_dir: Path):
         self.data_dir = data_dir
         self._index: dict | None = None
+        self.notification_cache: dict = {}
 
     @property
     def index(self) -> dict:
