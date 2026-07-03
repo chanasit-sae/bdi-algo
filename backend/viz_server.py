@@ -154,6 +154,9 @@ INDEX_HTML = r"""<!doctype html>
   <div><label title="Baseline=slope: drop onsets preceded by a steep flow DECREASE (expiratory limb); pre-onset slope below this magnitude (L/min per second) is rejected. 0 = off">ExpGuard</label>
     <input id="sguard" type="number" value="100" min="0" step="10" style="width:64px;
       background:#0b1119;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px"></div>
+  <div><label title="Baseline=slope: min peak inspiratory flow (L/min) the rise must reach for an onset to count; ~60-90 for a normal adult. 0 = off">PeakMin</label>
+    <input id="speak" type="number" value="60" min="0" step="5" style="width:64px;
+      background:#0b1119;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px"></div>
   <div><label title="also list flat captures where the ventilator is not connected to a patient">Show disconnected</label>
     <input id="showDisc" type="checkbox"></div>
   <span class="muted" id="status"></span>
@@ -251,6 +254,7 @@ async function selectCapture(file){
   const swin = parseFloat(document.getElementById('swin').value) || 0.32;
   const srefr = parseFloat(document.getElementById('srefr').value) || 0;
   const sguard = parseFloat(document.getElementById('sguard').value) || 0;
+  const speak = parseFloat(document.getElementById('speak').value) || 0;
   const mode = document.getElementById('baseline').value;
   const baseline = (mode === 'manual')
     ? (parseFloat(document.getElementById('baseoff').value) || 0)
@@ -258,7 +262,7 @@ async function selectCapture(file){
   const [wf, br] = await Promise.all([
     j('/api/waveform?file='+encodeURIComponent(file)),
     j('/api/breaths?file='+encodeURIComponent(file)+'&hysteresis='+hyst+'&baseline='+baseline
-      +'&slope='+slope+'&sdelta='+sdelta+'&swin='+swin+'&srefr='+srefr+'&sguard='+sguard),
+      +'&slope='+slope+'&sdelta='+sdelta+'&swin='+swin+'&srefr='+srefr+'&sguard='+sguard+'&speak='+speak),
   ]);
   CUR = { file, wf, breaths: br.breaths, baseline: br.baseline };
   const n = wf.t_sec.length, dur = wf.t_sec[n-1] || 0;
@@ -336,6 +340,7 @@ function syncBaselineUI(){
   setEnabled('swin', slopeMode);
   setEnabled('srefr', slopeMode);
   setEnabled('sguard', slopeMode);
+  setEnabled('speak', slopeMode);
   // the level-crossing slope gate / hysteresis don't apply in slope mode
   setEnabled('slope', !slopeMode);
   setEnabled('hyst', !slopeMode);
@@ -370,7 +375,7 @@ async function init(){
   document.getElementById('breath').onchange = onBreathChange;
   document.getElementById('hyst').onchange = () => { if(CUR.file) selectCapture(CUR.file); };
   document.getElementById('slope').onchange = () => { if(CUR.file) selectCapture(CUR.file); };
-  for(const id of ['sdelta','swin','srefr','sguard'])
+  for(const id of ['sdelta','swin','srefr','sguard','speak'])
     document.getElementById(id).onchange = () => { if(CUR.file) selectCapture(CUR.file); };
   document.getElementById('baseline').onchange = () => { syncBaselineUI(); if(CUR.file) selectCapture(CUR.file); };
   document.getElementById('baseoff').oninput = () => { if(CUR.file) selectCapture(CUR.file); };
@@ -448,6 +453,7 @@ class Handler(BaseHTTPRequestHandler):
             swin = max(0.04, _qf("swin", 0.32))
             srefr = max(0.0, _qf("srefr", 1.0))
             sguard = max(0.0, _qf("sguard", 100.0))
+            speak = max(0.0, _qf("speak", 60.0))
             baseline = qs.get("baseline", ["zero"])[0]
             wf = load_waveform(self.data_dir / fname)
             if baseline == "auto":
@@ -467,7 +473,8 @@ class Handler(BaseHTTPRequestHandler):
             breaths = segment_capture(wf, raw_data=fname, baseline=base_arg,
                                       hysteresis=hyst, slope_threshold=slope,
                                       slope_window_sec=swin, slope_delta=sdelta,
-                                      slope_refractory_sec=srefr, slope_exp_guard=sguard)
+                                      slope_refractory_sec=srefr, slope_exp_guard=sguard,
+                                      slope_peak_min=speak)
             self._json({"breaths": breaths.to_dict(orient="records"), "baseline": base_val})
         else:
             self._json({"error": "not found"}, 404)

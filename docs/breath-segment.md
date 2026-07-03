@@ -74,6 +74,15 @@ flags a breath start when the jump exceeds `slope_delta`:
   expiration. On this sample the guard removes **92** such false onsets (**207 → 115
   breaths**, 39 captures unchanged) — almost all noise wobble on the flat `bd4963…`
   captures — while leaving the real cycling breaths intact.
+- **`slope_peak_min`** (default **60 L/min**, 0 = off) — drops candidates whose rise
+  never reaches a real inspiratory **peak flow**. From the onset it walks forward while
+  flow keeps rising and takes the value at the **first descending point** (the peak of
+  that inspiratory limb, `_first_peak_flow`, capped at `slope_refractory_sec`); if that
+  peak is below `slope_peak_min` the candidate is a low-amplitude wobble, not a breath,
+  and is skipped. A normal adult inspiratory peak is ~60–90 L/min. On this sample the
+  real cycling onsets (`2a7b9f…`) peak ~91–93 L/min, while the onsets that survive the
+  exp-guard have a peak median ~78 (p25 ~65, p10 ~59); a **60** cut keeps ~87% (100/115)
+  of them and clears the residual low-amplitude noise.
 
 In this mode expiration onsets (`insp_end`) still come from the level crossing of the
 per-capture `auto` baseline, so `ti`/`te` and the volume/pressure metrics stay defined.
@@ -114,8 +123,8 @@ Real flow may not return exactly to zero at the inspiration→expiration transit
 ## Public API
 | Function | Purpose |
 |----------|---------|
-| `segment_capture(wf, patient_id, raw_data, min_breath_sec=0.0, baseline="zero", hysteresis=0.0, slope_threshold=0.0, slope_window_sec=0.32, slope_delta=100.0, slope_refractory_sec=1.0, slope_exp_guard=100.0)` | Segment one `load_waveform` DataFrame → breath table |
-| `segment_dataset(data_dir, min_breath_sec=0.0, baseline="zero", hysteresis=0.0, slope_threshold=0.0, slope_window_sec=0.32, slope_delta=100.0, slope_refractory_sec=1.0, slope_exp_guard=100.0)` | Segment every referenced capture → one combined table |
+| `segment_capture(wf, patient_id, raw_data, min_breath_sec=0.0, baseline="zero", hysteresis=0.0, slope_threshold=0.0, slope_window_sec=0.32, slope_delta=100.0, slope_refractory_sec=1.0, slope_exp_guard=100.0, slope_peak_min=60.0)` | Segment one `load_waveform` DataFrame → breath table |
+| `segment_dataset(data_dir, min_breath_sec=0.0, baseline="zero", hysteresis=0.0, slope_threshold=0.0, slope_window_sec=0.32, slope_delta=100.0, slope_refractory_sec=1.0, slope_exp_guard=100.0, slope_peak_min=60.0)` | Segment every referenced capture → one combined table |
 | `estimate_baseline(flow, q=5.0)` | Low-percentile (end-expiratory) baseline estimate |
 | `save_breaths(df, path)` | Persist the breath table (Parquet or CSV by extension) |
 

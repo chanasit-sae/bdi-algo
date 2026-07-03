@@ -82,12 +82,29 @@ def _detect_crossings(
     return np.array(rising, dtype=int), np.array(falling, dtype=int)
 
 
+def _first_peak_flow(flow: np.ndarray, i: int, cap: int) -> float:
+    """Flow value at the first inspiratory peak at or after index i.
+
+    Walk forward from i while flow keeps rising and return the value at the first
+    point where it stops climbing (the first descending point / local max), i.e.
+    the peak inspiratory flow of the rise the onset started. Search is capped at
+    `cap` samples so a slow drift does not run past the breath.
+    """
+    j = i
+    end = min(len(flow) - 1, i + cap)
+    while j < end and flow[j + 1] >= flow[j]:
+        j += 1
+    return float(flow[j])
+
+
 def _detect_slope_onsets(
     flow: np.ndarray,
     window: int,
     delta_threshold: float,
     refractory: int | None = None,
     exp_guard: float = 0.0,
+    peak_min: float = 0.0,
+    peak_cap: int | None = None,
 ) -> np.ndarray:
     """Return inspiration-onset indices from a rise in slope relative to its trend.
 
@@ -106,11 +123,20 @@ def _detect_slope_onsets(
     slope stays above the guard; the guard is a magnitude so plateau noise dipping
     slightly negative is not mistaken for expiration.
 
-    window / refractory are in samples; delta_threshold / exp_guard are L/min per s.
+    peak_min (L/min, 0 = off) requires the rise the onset starts to reach a real
+    peak inspiratory flow: the first flow peak after the candidate (see
+    `_first_peak_flow`, searched up to `peak_cap` samples ahead, default =
+    refractory) must be at least `peak_min`, else the point is too weak to be a
+    breath and is skipped. ~60-90 L/min is typical for a normal adult.
+
+    window / refractory / peak_cap are in samples; delta_threshold / exp_guard are
+    L/min per second; peak_min is L/min.
     """
     slope = np.gradient(flow) * SAMPLE_RATE_HZ
     if refractory is None:
         refractory = window
+    if peak_cap is None:
+        peak_cap = max(1, refractory)
     onsets: list[int] = []
     last = -(10 ** 9)
     for i in range(window, len(flow)):
@@ -118,6 +144,8 @@ def _detect_slope_onsets(
         if slope[i] - trend < delta_threshold or (i - last) <= refractory:
             continue
         if exp_guard > 0 and slope[i - window:i].min() < -exp_guard:
+            continue
+        if peak_min > 0 and _first_peak_flow(flow, i, peak_cap) < peak_min:
             continue
         onsets.append(i)
         last = i
@@ -136,6 +164,7 @@ def segment_capture(
     slope_delta: float = 100.0,
     slope_refractory_sec: float = 1.0,
     slope_exp_guard: float = 100.0,
+    slope_peak_min: float = 60.0,
 ) -> pd.DataFrame:
     """Segment one waveform DataFrame (from load_waveform) into breaths.
 
@@ -146,12 +175,14 @@ def segment_capture(
     slope_threshold: min rise rate (L/min per second) at the inspiration onset;
         both this and the hysteresis band must be met to mark a breath boundary
         (0 = no slope gate). Used by the level-crossing modes only.
-    slope_window_sec / slope_delta / slope_refractory_sec / slope_exp_guard: for
-        baseline="slope" — the trailing trend window (seconds), the slope-jump
-        threshold (L/min per second) above that trend that flags a breath start, the
-        minimum spacing between onsets (seconds), and the expiratory guard (L/min per
-        second) that drops candidates preceded by a steep flow *decrease* i.e. the
-        expiratory limb (see `_detect_slope_onsets`).
+    slope_window_sec / slope_delta / slope_refractory_sec / slope_exp_guard /
+        slope_peak_min: for baseline="slope" — the trailing trend window (seconds),
+        the slope-jump threshold (L/min per second) above that trend that flags a
+        breath start, the minimum spacing between onsets (seconds), the expiratory
+        guard (L/min per second) that drops candidates preceded by a steep flow
+        *decrease* i.e. the expiratory limb, and the minimum peak inspiratory flow
+        (L/min) the rise must reach for the onset to count (see
+        `_detect_slope_onsets`).
     """
     flow = wf["flow"].to_numpy()
     slope_mode = baseline == "slope"
@@ -172,7 +203,8 @@ def segment_capture(
     if slope_mode:
         window = max(1, int(round(slope_window_sec * SAMPLE_RATE_HZ)))
         refractory = max(1, int(round(slope_refractory_sec * SAMPLE_RATE_HZ)))
-        rising = _detect_slope_onsets(flow, window, slope_delta, refractory, slope_exp_guard)
+        rising = _detect_slope_onsets(flow, window, slope_delta, refractory,
+                                      slope_exp_guard, slope_peak_min)
         _, falling = _detect_crossings(flow, base, hysteresis)
     else:
         rising, falling = _detect_crossings(flow, base, hysteresis, slope_threshold)
@@ -234,6 +266,7 @@ def segment_dataset(
     slope_delta: float = 100.0,
     slope_refractory_sec: float = 1.0,
     slope_exp_guard: float = 100.0,
+    slope_peak_min: float = 60.0,
 ) -> pd.DataFrame:
     """Segment every capture referenced in a data directory into one breath table.
 
@@ -261,7 +294,7 @@ def segment_dataset(
         base = patient_base[pid] if baseline == "patient" else baseline
         frames.append(segment_capture(wf, pid, raw, min_breath_sec, base, hysteresis,
                                        slope_threshold, slope_window_sec, slope_delta,
-                                       slope_refractory_sec, slope_exp_guard))
+                                       slope_refractory_sec, slope_exp_guard, slope_peak_min))
     if not frames:
         return pd.DataFrame(columns=BREATH_COLUMNS)
     out = pd.concat(frames, ignore_index=True)
@@ -318,6 +351,10 @@ if __name__ == "__main__":
                     help="baseline=slope: drop onsets preceded by a steep flow "
                          "decrease (expiratory limb); min pre-onset slope below "
                          "this magnitude (L/min per second) is rejected (0 = off, default 100)")
+    ap.add_argument("--slope-peak-min", type=float, default=60.0,
+                    help="baseline=slope: min peak inspiratory flow (L/min) the rise "
+                         "must reach for an onset to count; ~60-90 for a normal adult "
+                         "(0 = off, default 60)")
     args = ap.parse_args()
 
     baseline = args.baseline
@@ -329,7 +366,8 @@ if __name__ == "__main__":
                               slope_window_sec=args.slope_window_sec,
                               slope_delta=args.slope_delta,
                               slope_refractory_sec=args.slope_refractory_sec,
-                              slope_exp_guard=args.slope_exp_guard)
+                              slope_exp_guard=args.slope_exp_guard,
+                              slope_peak_min=args.slope_peak_min)
     n_partial = int((~breaths["is_complete"]).sum())
     print(f"segmented {breaths['raw_data'].nunique()} captures "
           f"into {len(breaths)} breaths "
