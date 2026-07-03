@@ -126,16 +126,16 @@ class NotificationScan:
 class Dataset:
     """Lazily-built, cached dataset index for the running server.
 
-    `notification_cache` is a plain dict (key -> (notifications, scanned_count))
-    used by the asynchrony router to avoid re-scanning the whole dataset on
-    every /api/notifications request. Owned here rather than module-level in
-    the router so it lives and dies with this one server process/instance.
+    `notification_scans` holds one NotificationScan per distinct set of
+    detection params the asynchrony router has ever been asked for — owned
+    here (rather than module-level in the router) so it lives and dies with
+    this one server process/instance, same as `_index`.
     """
 
     def __init__(self, data_dir: Path):
         self.data_dir = data_dir
         self._index: dict | None = None
-        self.notification_cache: dict = {}
+        self.notification_scans: dict = {}
 
     @property
     def index(self) -> dict:
