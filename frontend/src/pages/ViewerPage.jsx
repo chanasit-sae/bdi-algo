@@ -25,6 +25,7 @@ import WaveformChart from "../components/WaveformChart.jsx";
 import MetadataPanel from "../components/MetadataPanel.jsx";
 import BreathPanel from "../components/BreathPanel.jsx";
 import AsynchronyPanel from "../components/AsynchronyPanel.jsx";
+import VitalsPanel from "../components/VitalsPanel.jsx";
 
 export default function ViewerPage() {
   const [searchParams] = useSearchParams();
@@ -45,6 +46,7 @@ export default function ViewerPage() {
   const [asynchronyIndex, setAsynchronyIndex] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [mpStatus, setMpStatus] = useState(null);
+  const [mpAboveThreshold, setMpAboveThreshold] = useState(false);
   const [mpLoading, setMpLoading] = useState(false);
   const [status, setStatus] = useState("");
 
@@ -71,6 +73,7 @@ export default function ViewerPage() {
     if (!patientId) {
       setAsynchronyIndex(null);
       setMpStatus(null);
+      setMpAboveThreshold(false);
       setAiLoading(false);
       setMpLoading(false);
       return;
@@ -85,8 +88,16 @@ export default function ViewerPage() {
       .finally(() => !cancelled && setAiLoading(false));
     api
       .mechanicalPower(patientId)
-      .then((d) => !cancelled && setMpStatus(d.status))
-      .catch(() => !cancelled && setMpStatus(null))
+      .then((d) => {
+        if (cancelled) return;
+        setMpStatus(d.status);
+        setMpAboveThreshold(!!d.above_threshold);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMpStatus(null);
+        setMpAboveThreshold(false);
+      })
       .finally(() => !cancelled && setMpLoading(false));
     return () => {
       cancelled = true;
@@ -237,13 +248,32 @@ export default function ViewerPage() {
   );
 
   const sel = breathIdx >= 0 ? breaths[breathIdx] : null;
-  const slopeRef =
-    params.baselineMode === "slope"
-      ? Number(params.sdelta) || 0
-      : Number(params.slope) || 0;
+  const aiPct = asynchronyIndex != null ? asynchronyIndex * 100 : null;
+  const aiFlagged = aiPct != null && aiPct > 10;
+  const noticeFlagged = aiFlagged || mpAboveThreshold;
 
   return (
     <>
+      {noticeFlagged && (
+        <div
+          style={{
+            background: "rgba(220, 38, 38, 0.1)",
+            borderBottom: "2px solid var(--alert)",
+            color: "var(--alert)",
+            padding: "10px 18px",
+            fontSize: 13,
+            fontWeight: 600,
+          }}
+        >
+          ⚠ Notice —{" "}
+          {[
+            aiFlagged && `Asynchrony index ${aiPct.toFixed(1)}% (>10%)`,
+            mpAboveThreshold && mpStatus && `Mechanical power ${mpStatus.avg_mp_j_per_min.toFixed(1)} J/min (above threshold)`,
+          ]
+            .filter(Boolean)
+            .join("  ·  ")}
+        </div>
+      )}
       <div className="controls">
         <CaptureSelect
           visiblePatients={visiblePatients}
@@ -305,30 +335,25 @@ export default function ViewerPage() {
             highlights={highlights}
             onSelectTime={selectBreathAtTime}
           />
-          <WaveformChart
-            title="Flow slope (L/min/s)"
-            color={COLORS.slope}
-            t={wf?.t_sec}
-            y={wf?.slope}
-            breaths={breaths}
-            sel={sel}
-            baseVal={slopeRef || null}
-            highlights={highlights}
-            onSelectTime={selectBreathAtTime}
-          />
         </div>
         <aside>
-          <h2>Metadata</h2>
-          <MetadataPanel
-            patient={patient}
-            capture={capture}
-            asynchronyIndex={asynchronyIndex}
-            aiLoading={aiLoading}
-            mpStatus={mpStatus}
-            mpLoading={mpLoading}
-          />
-          <h2 style={{ marginTop: 16 }}>Asynchrony</h2>
-          <AsynchronyPanel events={asyncEvents} activeIdx={activeEventIdx} onSelect={selectEvent} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div>
+              <h2>AI% / Mech. power</h2>
+              <VitalsPanel
+                asynchronyIndex={asynchronyIndex}
+                aiLoading={aiLoading}
+                mpStatus={mpStatus}
+                mpLoading={mpLoading}
+              />
+            </div>
+            <div>
+              <h2>Asynchrony</h2>
+              <AsynchronyPanel events={asyncEvents} activeIdx={activeEventIdx} onSelect={selectEvent} />
+            </div>
+          </div>
+          <h2 style={{ marginTop: 16 }}>Metadata</h2>
+          <MetadataPanel patient={patient} capture={capture} />
           <h2 style={{ marginTop: 16 }}>Breath</h2>
           <BreathPanel breath={sel} />
         </aside>

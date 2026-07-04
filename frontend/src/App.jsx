@@ -7,7 +7,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="topnav">
-        <h1>Ventilator Waveform Viewer</h1>
+        <h1>Ventilator Safety Monitoring System</h1>
         <nav>
           {routes
             .filter((r) => r.nav !== false)

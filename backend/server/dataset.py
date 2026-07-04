@@ -14,6 +14,7 @@ from pathlib import Path
 from parser import load_dataset, metadata_frame, load_waveform
 
 MIN_FLOW_RANGE = 5.0  # L/min; below this the flow is flat -> ventilator not on a patient
+MIN_VOLUME_RANGE = 10.0  # mL; disconnected captures measured at exactly 0.0, real ones in the hundreds
 
 
 def denan(obj):
@@ -32,9 +33,14 @@ def denan(obj):
 
 
 def _is_connected(data_dir: Path, fname: str) -> bool:
-    """True if the flow has real breathing excursion (not a flat/disconnected trace)."""
-    flow = load_waveform(data_dir / fname)["flow"]
-    return float(flow.max() - flow.min()) >= MIN_FLOW_RANGE
+    """True if both flow and volume show real breathing excursion. Volume
+    alone is the more reliable signal -- disconnected captures measure at
+    exactly 0.0 range, while a few have enough noise in flow to clear
+    MIN_FLOW_RANGE on its own despite delivering no actual tidal volume."""
+    wf = load_waveform(data_dir / fname)
+    flow_range = float(wf["flow"].max() - wf["flow"].min())
+    volume_range = float(wf["volume"].max() - wf["volume"].min())
+    return flow_range >= MIN_FLOW_RANGE and volume_range >= MIN_VOLUME_RANGE
 
 
 def build_index(data_dir: Path) -> dict:
