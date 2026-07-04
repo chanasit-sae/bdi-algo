@@ -76,14 +76,19 @@ appear as a row in the breath table — it has to be found as a sub-threshold de
 inside an already-recorded **expiratory** window.
 
 ⚠️ **Unlike double-triggering, there is no single agreed closed-form formula for this.**
-The gold-standard reference signal is esophageal pressure, which this dataset doesn't
-have; with only Flow/Pressure/Volume, detection has to work off a surrogate signature.
-The approach below — **require a concordant deflection in both Flow and Pressure** — is a
-deliberately conservative heuristic (fewer false positives, at the risk of missing effort
-that only shows clearly on one signal), in the spirit of how automated-asynchrony-detection
-literature (e.g. Younes et al.; Chen et al.'s review of automated methods) frames
-flow/pressure-only detection when esophageal pressure is unavailable. **Treat the
-thresholds below as a tunable starting point, not a validated clinical cutoff.**
+The gold-standard reference signal is esophageal/transdiaphragmatic pressure, which this
+dataset doesn't have; with only Flow/Pressure/Volume, detection has to work off a surrogate
+signature. The approach below — **require a concordant deflection in both Flow and
+Pressure** — is a deliberately conservative heuristic (fewer false positives, at the risk of
+missing effort that only shows clearly on one signal). It's in the same spirit as
+**Mulqueeny Q, Ceriana P, Carlucci A, Fracchia C, Delmastro M, Nava S. "Automatic detection
+of ineffective triggering and double triggering during mechanical ventilation."
+*Intensive Care Med.* 2007;33(11):2014–2018** — an automated flow-based ineffective-effort
+detector (perturbation of the expiratory flow signal) validated at 91% sensitivity / 97%
+specificity against transdiaphragmatic pressure as gold standard — though that algorithm
+works off flow derivatives alone; adding the concordant pressure-dip requirement here is
+this implementation's own conservative extension, not something borrowed from that paper.
+**Treat the thresholds below as a tunable starting point, not a validated clinical cutoff.**
 
 ### Signature, per breath's own expiratory window (`insp_end_idx` → `exp_end_idx`)
 
@@ -175,8 +180,17 @@ flow starvation.
 
 ⚠️ Same caveat as ineffective effort: **no single agreed closed-form formula** — the
 literature describes this qualitatively ("scalloped/concave pressure waveform"), not as a
-specific threshold algorithm. This is a heuristic calibrated against this dataset's own
-inspiratory pressure noise floor, not an arbitrary guess.
+specific threshold algorithm. Flow starvation as a named, visually-identified sign is
+described in **Nilsestuen JO, Hargett KD. "Using ventilator graphics to identify
+patient-ventilator asynchrony." *Respir Care.* 2005;50(2):202–234** (the standard reference
+for waveform-based asynchrony identification generally); a recent automated-detection
+approach for this specific asynchrony is **de Haro C, Santos-Pulpón V, Telías I, et al.
+"Flow starvation during square-flow assisted ventilation detected by supervised deep
+learning techniques." *Crit Care.* 2024;28:83** (DOI: 10.1186/s13054-024-04845-y) — that
+paper uses a trained classifier rather than a fixed threshold, so it doesn't hand us a
+formula either, but confirms this is an actively-studied, clinically-named signature and
+not something invented for this app. The rise-dip-rise notch heuristic below is calibrated
+against this dataset's own inspiratory pressure noise floor, not an arbitrary guess.
 
 Unlike the other three detectors, this looks at the **inspiratory** phase (double-triggering
 and ineffective effort both key off expiration; auto-PEEP scores complete breaths only —
@@ -268,6 +282,27 @@ across a patient's connected captures). Flagged once that ratio reaches `ai_thre
 (default **10%**). Like mechanical power, this is patient-level, not per-capture, so it has
 no `t0`/`t1` span and no breath to select — its notification links to the patient's most
 recent capture with nothing pre-selected.
+
+**The 10% default isn't an arbitrary round number** — it's the exact cutoff from the
+clinical literature that coined the term "asynchrony index": **Thille AW et al.**
+(*Intensive Care Med.* 2006;32(10):1515–1522, already cited in §1) found 24% of patients
+had an AI above 10%, and **Blanch L, Villagra A, Sales B, et al. "Asynchronies during
+mechanical ventilation are associated with mortality." *Intensive Care Med.*
+2015;41(4):633–641** — a prospective study of 7,027 ventilator-hours across 50 patients —
+found AI > 10% independently associated with longer ventilation and higher ICU/hospital
+mortality, establishing 10% as *the* clinically-adopted alert threshold.
+
+**Important distinction, for honesty rather than false equivalence:** the classic clinical
+AI (Thille/Blanch) is a **count-based** ratio — `(number of asynchrony events) / (total
+respiratory rate, i.e. ventilator cycles + wasted efforts) × 100`. This implementation's
+`asynchrony_index` is a **time-based** ratio instead — flagged-event *seconds* over total
+waveform *seconds* (see `_patient_asynchrony_index` in `backend/server/routers/asynchrony.py`).
+It's a deliberate adaptation, not the literal published formula: a duration-weighted measure
+was simpler to compute directly from this app's existing `t0`/`t1` event spans without
+also tracking a separate "total respiratory rate" denominator, and it naturally down-weights
+brief flags relative to sustained ones. It borrows the clinically-validated *threshold value*
+(10%) from Thille/Blanch, not their exact metric definition — worth knowing if comparing
+this app's numbers against a paper that reports "AI."
 
 Note the query param is `ai_threshold`, not `threshold` — `mp_params` already owns
 `threshold` (mechanical power's), and since both dependencies are combined on the same
