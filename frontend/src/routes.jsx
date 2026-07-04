@@ -13,9 +13,9 @@ import AboutPage from "./pages/AboutPage.jsx";
 //  without a nav link.
 // ─────────────────────────────────────────────────────────────────────────────
 const routes = [
-  { path: "/", label: "Viewer", element: <ViewerPage /> },
-  { path: "/notifications", label: "Notifications", element: <NotificationsPage /> },
   { path: "/patients", label: "Patients", element: <PatientsPage /> },
+  { path: "/", label: "Monitor", element: <ViewerPage /> },
+  { path: "/notifications", label: "Notifications", element: <NotificationsPage /> },
   { path: "/about", label: "About", element: <AboutPage /> },
 ];
 
