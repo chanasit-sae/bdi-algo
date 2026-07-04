@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api.js";
+import { mpColorFor } from "../components/VitalsPanel.jsx";
 
 // The capture a card's click-through should land on -- most recent first,
 // same ordering the backend uses for notifications, so "click a patient"
@@ -98,6 +99,7 @@ export default function PatientsPage() {
               const loading = !entry || entry.loading;
               const pct = entry && entry.ai != null ? entry.ai * 100 : null;
               const aiColor = loading ? "var(--muted)" : pct != null && pct > 10 ? "var(--alert)" : "var(--accent)";
+              const mpColor = loading ? "var(--muted)" : mpColorFor(entry.mp);
               const cap = mostRecentCapture(p);
               return (
                 <Link
@@ -114,7 +116,7 @@ export default function PatientsPage() {
                       <div className="patient-card-ai-label">Asynchrony index</div>
                     </div>
                     <div>
-                      <div className="patient-card-mp">
+                      <div className="patient-card-mp" style={{ color: mpColor }}>
                         {loading ? "loading…" : entry.mp != null ? entry.mp.toFixed(1) : "—"}
                       </div>
                       <div className="patient-card-ai-label">MP J/min</div>
