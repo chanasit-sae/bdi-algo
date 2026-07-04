@@ -357,10 +357,9 @@ aside h2 {
   line-height: 1;
 }
 .patient-card-mp {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 28px;
+  font-weight: 700;
   line-height: 1;
-  color: var(--fg);
 }
 .patient-card-ai-label {
   font-size: 10px;

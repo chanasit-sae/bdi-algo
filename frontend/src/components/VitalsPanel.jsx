@@ -6,7 +6,8 @@
 // nothing to show".
 // MP color bands: <=12 J/min green (normal), 12-17 amber (watch), >17 red
 // (Serpa Neto et al. 2018 threshold range -- see docs/asynchrony.md §5).
-function mpColorFor(value) {
+// Exported so PatientsPage's cards use the exact same bands.
+export function mpColorFor(value) {
   if (value == null) return "var(--muted)";
   if (value > 17) return "var(--alert)";
   if (value > 12) return "var(--press)";
