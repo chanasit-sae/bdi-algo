@@ -305,17 +305,6 @@ export default function ViewerPage() {
             highlights={highlights}
             onSelectTime={selectBreathAtTime}
           />
-          <WaveformChart
-            title="Flow slope (L/min/s)"
-            color={COLORS.slope}
-            t={wf?.t_sec}
-            y={wf?.slope}
-            breaths={breaths}
-            sel={sel}
-            baseVal={slopeRef || null}
-            highlights={highlights}
-            onSelectTime={selectBreathAtTime}
-          />
         </div>
         <aside>
           <h2>Metadata</h2>
