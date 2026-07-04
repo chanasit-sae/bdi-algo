@@ -69,16 +69,16 @@ export default function NotificationsPage() {
           Notifications
         </h2>
 
-        <div className="field" style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 12 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
           {ALL_TYPES.map((t) => (
-            <label key={t} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
-              <input
-                type="checkbox"
-                checked={enabledTypes.has(t)}
-                onChange={() => toggleType(t)}
-              />
+            <button
+              key={t}
+              type="button"
+              className={"filter-chip" + (enabledTypes.has(t) ? " active" : "")}
+              onClick={() => toggleType(t)}
+            >
               {TYPE_LABEL[t]}
-            </label>
+            </button>
           ))}
         </div>
 

@@ -166,6 +166,27 @@ aside h2 {
   color: var(--muted);
 }
 
+/* ---- type filter chips ---- */
+.filter-chip {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.filter-chip:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.filter-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
 /* ---- notifications grid (4x4 cards) ---- */
 .notif-grid {
   display: grid;
