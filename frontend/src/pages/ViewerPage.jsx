@@ -25,6 +25,7 @@ import WaveformChart from "../components/WaveformChart.jsx";
 import MetadataPanel from "../components/MetadataPanel.jsx";
 import BreathPanel from "../components/BreathPanel.jsx";
 import AsynchronyPanel from "../components/AsynchronyPanel.jsx";
+import VitalsPanel from "../components/VitalsPanel.jsx";
 
 export default function ViewerPage() {
   const [searchParams] = useSearchParams();
@@ -303,17 +304,23 @@ export default function ViewerPage() {
           />
         </div>
         <aside>
-          <h2>Metadata</h2>
-          <MetadataPanel
-            patient={patient}
-            capture={capture}
-            asynchronyIndex={asynchronyIndex}
-            aiLoading={aiLoading}
-            mpStatus={mpStatus}
-            mpLoading={mpLoading}
-          />
-          <h2 style={{ marginTop: 16 }}>Asynchrony</h2>
-          <AsynchronyPanel events={asyncEvents} activeIdx={activeEventIdx} onSelect={selectEvent} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div>
+              <h2>AI% / Mech. power</h2>
+              <VitalsPanel
+                asynchronyIndex={asynchronyIndex}
+                aiLoading={aiLoading}
+                mpStatus={mpStatus}
+                mpLoading={mpLoading}
+              />
+            </div>
+            <div>
+              <h2>Asynchrony</h2>
+              <AsynchronyPanel events={asyncEvents} activeIdx={activeEventIdx} onSelect={selectEvent} />
+            </div>
+          </div>
+          <h2 style={{ marginTop: 16 }}>Metadata</h2>
+          <MetadataPanel patient={patient} capture={capture} />
           <h2 style={{ marginTop: 16 }}>Breath</h2>
           <BreathPanel breath={sel} />
         </aside>
