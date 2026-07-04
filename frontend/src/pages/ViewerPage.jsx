@@ -237,10 +237,6 @@ export default function ViewerPage() {
   );
 
   const sel = breathIdx >= 0 ? breaths[breathIdx] : null;
-  const slopeRef =
-    params.baselineMode === "slope"
-      ? Number(params.sdelta) || 0
-      : Number(params.slope) || 0;
 
   return (
     <>
