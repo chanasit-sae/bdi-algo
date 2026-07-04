@@ -46,6 +46,7 @@ export default function ViewerPage() {
   const [asynchronyIndex, setAsynchronyIndex] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [mpStatus, setMpStatus] = useState(null);
+  const [mpAboveThreshold, setMpAboveThreshold] = useState(false);
   const [mpLoading, setMpLoading] = useState(false);
   const [status, setStatus] = useState("");
 
@@ -72,6 +73,7 @@ export default function ViewerPage() {
     if (!patientId) {
       setAsynchronyIndex(null);
       setMpStatus(null);
+      setMpAboveThreshold(false);
       setAiLoading(false);
       setMpLoading(false);
       return;
@@ -86,8 +88,16 @@ export default function ViewerPage() {
       .finally(() => !cancelled && setAiLoading(false));
     api
       .mechanicalPower(patientId)
-      .then((d) => !cancelled && setMpStatus(d.status))
-      .catch(() => !cancelled && setMpStatus(null))
+      .then((d) => {
+        if (cancelled) return;
+        setMpStatus(d.status);
+        setMpAboveThreshold(!!d.above_threshold);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMpStatus(null);
+        setMpAboveThreshold(false);
+      })
       .finally(() => !cancelled && setMpLoading(false));
     return () => {
       cancelled = true;
@@ -238,9 +248,32 @@ export default function ViewerPage() {
   );
 
   const sel = breathIdx >= 0 ? breaths[breathIdx] : null;
+  const aiPct = asynchronyIndex != null ? asynchronyIndex * 100 : null;
+  const aiFlagged = aiPct != null && aiPct > 10;
+  const noticeFlagged = aiFlagged || mpAboveThreshold;
 
   return (
     <>
+      {noticeFlagged && (
+        <div
+          style={{
+            background: "rgba(220, 38, 38, 0.1)",
+            borderBottom: "2px solid var(--alert)",
+            color: "var(--alert)",
+            padding: "10px 18px",
+            fontSize: 13,
+            fontWeight: 600,
+          }}
+        >
+          ⚠ Notice —{" "}
+          {[
+            aiFlagged && `Asynchrony index ${aiPct.toFixed(1)}% (>10%)`,
+            mpAboveThreshold && mpStatus && `Mechanical power ${mpStatus.avg_mp_j_per_min.toFixed(1)} J/min (above threshold)`,
+          ]
+            .filter(Boolean)
+            .join("  ·  ")}
+        </div>
+      )}
       <div className="controls">
         <CaptureSelect
           visiblePatients={visiblePatients}
