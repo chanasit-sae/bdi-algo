@@ -61,24 +61,22 @@ export default function NotificationList({ notifications, formula }) {
     return <p className="muted">No asynchrony notifications with the current settings.</p>;
   }
   return (
-    <ul className="notif-list">
+    <div className="notif-grid">
       {notifications.map((n, i) => (
-        <li key={i}>
-          <Link to={viewerLink(n, formula)} className="notif-card">
-            <span className="notif-type">{TYPE_LABEL[n.type] || n.type}</span>
-            <span className="notif-patient">{n.patient_id.slice(0, 8)}…</span>
-            <span className="notif-capture">
-              day {n.day} · {n.time}
-            </span>
-            <span className="notif-detail">
-              {n.breath_idx_a != null && `breath ${n.breath_idx_a}`}
-              {n.breath_idx_b != null && ` → ${n.breath_idx_b}`}
-              {n.breath_idx_a != null && " · "}
-              {n.detail}
-            </span>
-          </Link>
-        </li>
+        <Link key={i} to={viewerLink(n, formula)} className="notif-card">
+          <span className="notif-type">{TYPE_LABEL[n.type] || n.type}</span>
+          <span className="notif-patient">{n.patient_id.slice(0, 8)}…</span>
+          <span className="notif-capture">
+            day {n.day} · {n.time}
+          </span>
+          <span className="notif-detail">
+            {n.breath_idx_a != null && `breath ${n.breath_idx_a}`}
+            {n.breath_idx_b != null && ` → ${n.breath_idx_b}`}
+            {n.breath_idx_a != null && " · "}
+            {n.detail}
+          </span>
+        </Link>
       ))}
-    </ul>
+    </div>
   );
 }
