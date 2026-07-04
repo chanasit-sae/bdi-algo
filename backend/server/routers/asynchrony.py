@@ -704,17 +704,27 @@ def get_notifications(
 
     # Mechanical power and the asynchrony index are both patient-level, not
     # per-capture, so neither can share the breath-event scan above -- each
-    # gets its own NotificationScan over patients instead of captures,
-    # advanced with the exact same "only do enough work for this page" bound,
-    # so a page request never waits on the whole capture list OR every
-    # patient's own computation either.
+    # gets its own NotificationScan over patients instead of captures.
+    #
+    # Each scan is only advanced up to whatever's still missing from the
+    # *combined* total, not `needed` on its own -- e.g. if the breath-event
+    # scan alone already found 10 events for a page_size=10 page, mp_scan and
+    # ai_scan are skipped entirely for this request. Without that, either one
+    # (patient-level flags are rare -- often just 1-2 patients out of many)
+    # would keep claiming patients until it *exhausted the whole patient
+    # list* trying to reach `needed` results it may never have, even though
+    # the page was already fully answerable from breath events alone.
     needed = page * page_size
     if not scan.complete and len(scan.results) < needed:
         advance_scan(ds, scan, seg, dt, ie, ap, fs, needed)
-    if not mp_scan.complete and len(mp_scan.results) < needed:
-        advance_mp_scan(ds, mp_scan, seg, mp, include_disconnected, needed)
-    if not ai_scan.complete and len(ai_scan.results) < needed:
-        advance_ai_scan(ds, ai_scan, seg, dt, ie, ap, fs, ai, needed)
+
+    remaining = needed - len(scan.results)
+    if remaining > 0 and not mp_scan.complete and len(mp_scan.results) < remaining:
+        advance_mp_scan(ds, mp_scan, seg, mp, include_disconnected, remaining)
+
+    remaining = needed - len(scan.results) - len(mp_scan.results)
+    if remaining > 0 and not ai_scan.complete and len(ai_scan.results) < remaining:
+        advance_ai_scan(ds, ai_scan, seg, dt, ie, ap, fs, ai, remaining)
 
     # results can complete out of claim-order under concurrent advancing
     # (two captures processed in parallel may finish in either order), so
